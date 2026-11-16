@@ -15,12 +15,13 @@ starting point.
 
 ## Status
 
-As of 2026-11-16, Phase 0 of PLAN.md (the skeleton) is done. Next is
-Phase 1, a first server.
+As of 2026-11-16, Phases 0 and 1 of PLAN.md are done: `src/GemServer`
+and `src/pogemini` serve a fixed page, tested by `TestServe` with our
+own client. Next is Phase 2, requests.
 
 **poc 0.13.0 or later, and polibtls and posockets built by the same
 poc.** A poc library works only with the poc that built it. Both were
-installed in `~/.local/lib/poc` on 2026-11-16 (polibtls at 9acaecc,
+installed in `~/.local/lib/poc` on 2026-11-16 (polibtls at b828a53,
 posockets at 059b47d), each from a `git archive` of its commit by
 `make install`. After a poc upgrade, reinstall both the same way;
 `make deps` says whether they match.
@@ -43,7 +44,19 @@ deps`, `make test`, `make clean`, with `POC` from `PATH`, output under
 `build/`, `.NOTPARALLEL`, and `POC_LIBRARY_PATH` unexported. polibtls
 and posockets are taken from `POCLIBDIR` (`~/.local/lib/poc`). The
 integer size model is `-OC`, the one they are installed in. Add a
-program to `PROGS`, a test to `TESTS`.
+program to `PROGS`, a test to `TESTS`. `make` also makes the tests'
+certificates (`test/make-certs.sh`, polibtls's) into `build/certs`.
+
+## Test
+
+As polibtls's: one main module per concern in `test/`, run from
+`test/`, printing `ok   - `/`FAIL - ` through `test/Check.Mod` and a
+summary. The server runs as a child process (`test/Child.Mod`), as a
+user runs it: `-port 0`, its port read from its first line, `-n count`
+so it exits by itself, and its log, the rest of its output, checked
+after `Child.Wait`. `test/GemClient.Mod` is the client, in tasks, with a
+deadline of its own. A test task that passes a whole response by value
+needs a bigger stack than `TlsTasks.stackSize` (PLAN.md, Phase 1).
 
 ## Conventions
 
@@ -57,7 +70,7 @@ As polibtls's, in short:
   Linux-only (`/proc`, `accept4`, `epoll`, GNU options of commands,
   Linux paths); differences between systems go in a module's C part.
   Testing on the BSD hosts follows posockets' AGENTS.md, "Testing on
-  the BSD hosts", once polibtls is ported (Phase 7).
+  the BSD hosts", and polibtls's (Phase 7).
 - **Secrets**: never print, log or commit a key; test certificates are
   generated into `build/certs`.
 - **Bad outside data never halts** (a client's request, a missing file,

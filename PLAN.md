@@ -33,11 +33,9 @@ dynamic content, Titan uploads and proxying.
 **Portability** (the user, 2026-11-16): the server must build and run
 on FreeBSD, OpenBSD and NetBSD as well as Linux. poc supports all
 three (Peaseblossom's INSTALL.md: FreeBSD 15.1, OpenBSD 7.9, NetBSD
-11.0), and posockets is already tested on them (its Phase 9), but
-polibtls is not yet: its PLAN.md left the BSDs out of scope, noting
-that OpenBSD's own libtls has the same API. So the server's port waits
-on polibtls's (Phase 7), and until then the server is written so as
-not to need changing for it:
+11.0), and posockets and polibtls are tested on them (posockets' Phase
+9, polibtls's Phase 10, b828a53, on amd64 and i386). So the server is
+written so as not to need changing for them:
 
 - no Linux-only calls or files (`/proc`, `accept4`, `epoll`, Linux
   `sendfile`, GNU options of commands); POSIX, or what the four
@@ -102,11 +100,46 @@ Decided with the user, 2026-11-16:
   GeminiFetch, so the tests can send malformed requests and check
   exactly what comes back.
 
+### The server's structure (Phase 1)
+
+- **`GemServer`**, the engine, is GeminiHello's structure made a
+  module: `New(ctx, respond)` takes a configured `Tls.Context` and a
+  `Responder`; `Listen(host, port)` listens on both families (port 0:
+  the kernel's choice, in `port`); `Serve(count)` runs an accept task
+  per listener and a task per connection, and returns after `count`
+  connections have ended (0: never). Each connection has one deadline,
+  `SetDeadline` (10 s by default), for everything from handshake to
+  close_notify.
+- **An `Exchange`** is what a `Responder` sees: the client's address,
+  the request line (without CR LF), the client certificate's hash, and
+  `Header`, `Write` and `WriteString` to answer, which do nothing once a
+  write has failed. Requests are read and the response ended
+  (close_notify, then `LingeringClose`) by `GemServer`, so a responder
+  only answers. A line with no CR LF in its first 1026 bytes is answered
+  59 by `GemServer` itself, never reaching the responder. Later phases
+  add their logic as responders, without touching the connection code.
+- **The log** is a line per connection on standard output, written with
+  no wait between its parts so lines from different tasks never mix:
+  `<address> <status> <request> <hash|->`, or `<address> failed:
+  <why>`; the request has its control characters as `%XX`, so a client
+  can't forge a line. Phase 6 adds the time.
+- **`pogemini`**, the program: `-cert`, `-key`, `-port` (1965),
+  `-listen` (every address), `-deadline` ms and `-n count` (for the
+  tests); its first line on standard output is `port <n>`.
+
 ### Halt codes
 
 The poc runtime uses 10..20, and the po* libraries 61..99 (polibfyaml
 61..65, pofltk 70..78, posockets 80..89, polibtls 90..99). A module of
-this server that asserts a programmer's error uses 100..109.
+this server that asserts a programmer's error uses 100..109:
+
+| Code | Module | Meaning |
+|---|---|---|
+| 100 | GemServer | `Header` with a status outside 10..69, or a second header |
+| 101 | GemServer | `Header` with meta over 1024 bytes |
+| 102 | GemServer | `Write` without a 2x header first |
+| 103 | GemServer | a `Responder` returned without a header |
+| 104 | GemServer | `Serve` before `Listen` |
 
 ## Testing
 
@@ -125,12 +158,35 @@ The repository, README.md, AGENTS.md, this plan, a GNUmakefile with
 `make deps` checking that polibtls and posockets are installed and
 built by the poc in use, and the GitHub repository (public), 2026-11-16.
 
-### Phase 1: a first server
+### Phase 1: a first server [done]
 
 GeminiHello's structure as `src/`: listeners, accept tasks, a task per
 connection with a deadline, one capsule from the command line, every
 request answered with a fixed page; tests as in polibtls, against the
 server as a child process, with our own test client in `test/`.
+
+Done 2026-11-16: `src/GemServer.Mod` and `src/pogemini.Mod` ("The
+server's structure"). In `test/`: `GemClient` (a client in tasks, with
+its own deadline, able to send what no real client would), `Child`
+(spawn, read a line, wait, kill, from polibtls's `TestPeers`),
+`make-certs.sh` (polibtls's) and `TestServe`, which starts the server
+on port 0 and checks IPv4 and IPv6, a client certificate's hash in the
+log, a 1024-byte request served and a 1025-byte one refused (59), 1100
+bytes without CR LF (59), a control character escaped in the log, two
+silent clients (one without a handshake, one without a request) that
+hold up no third and are dropped at the deadline, the server's exit
+status and its log line for each connection, and an RSA key pair.
+Checked by hand against `openssl s_client`, gemget and `gnutls-cli`;
+the other clients go into the tests with Phase 2.
+
+Found on the way (poc 0.13.0):
+
+- **A value `ARRAY OF CHAR` parameter is copied onto the callee's
+  stack**, so passing a 64 KiB response to `Check.Contains` overran a
+  task's 64 KiB stack (SIGSEGV, the guard page). The test's tasks get
+  1 MiB; the server passes nothing that large by value.
+- **poc has no string concatenation** (`"a" + "b"` is an error), and
+  won't assign a string constant to an open array: use `COPY`.
 
 ### Phase 2: requests
 
@@ -144,7 +200,11 @@ file system.
 The configuration file and command-line options ("Design"): capsules
 (host, certificate, key, document root), listen addresses and port,
 deadlines, logging; and a self-signed certificate made with `openssl`
-for a capsule given none.
+for a capsule given none. The certificate must be made as polibtls's
+`test/make-certs.sh` makes its own: options OpenSSL 3 and LibreSSL both
+have, and `-sha256` named, since LibreSSL's `x509 -req` signs with
+SHA-1 by default, which GnuTLS rejects (polibtls's AGENTS.md, "From the
+port").
 
 ### Phase 4: serving files
 
@@ -165,9 +225,9 @@ privileges if started as root.
 
 ### Phase 7: the BSDs
 
-First polibtls's own port: libtls on each system (OpenBSD's in base,
-LibreTLS or LibreSSL on FreeBSD and NetBSD, to be found out), its tests
-run there as posockets' were. Then this server's tests, by `gmake test`
+First polibtls's own port, done 2026-11-16 (its Phase 10, b828a53):
+OpenBSD's libtls in base, LibreTLS from packages on FreeBSD and NetBSD,
+its tests passing on amd64 and i386. Then this server's tests, by `gmake test`
 on FreeBSD, OpenBSD and NetBSD hosts, and the self-signed certificate
 made with each system's `openssl`. Anything Linux-only found is fixed
 here, and a finding recorded in AGENTS.md.
@@ -187,11 +247,14 @@ the BSDs.
   running `openssl`), or document the `openssl` commands only?~~
   Generate one by running `openssl` when none is supplied (2026-11-16,
   with the user): "Design".
-- Does validating a request line belong here or in polibtls (polibtls's
+- ~~Does validating a request line belong here or in polibtls (polibtls's
   PLAN.md leaned towards here, with at most a bounded `ReadLine` in
-  polibtls)?
-- Which libtls on FreeBSD and NetBSD: LibreTLS from ports/pkgsrc, or
-  LibreSSL's? (polibtls's question, really; Phase 7.)
+  polibtls)?~~ Here: `GemServer` reads the line to CR LF within 1026
+  bytes (Phase 1), and Phase 2 validates it. polibtls needs no
+  `ReadLine`.
+- ~~Which libtls on FreeBSD and NetBSD: LibreTLS from ports/pkgsrc, or
+  LibreSSL's?~~ LibreTLS, from packages; OpenBSD's own in base
+  (polibtls's Phase 10, 2026-11-16).
 - Internationalised host names (punycode) and IRIs in requests.
 - ~~A test client: our own module in `test/`, or polibtls's
   `GeminiFetch` (an example, not installed)?~~ Our own in `test/`

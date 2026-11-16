@@ -12,9 +12,13 @@ serves every connection in a task of poc's cooperative `Tasks`, in one
 thread. It is meant for Linux and the BSDs (FreeBSD, OpenBSD, NetBSD)
 alike; so far it is built only on Linux.
 
-**Status:** just started. Nothing builds yet; [PLAN.md](PLAN.md) has
-the design and the roadmap, and [AGENTS.md](AGENTS.md) the working
-notes.
+**Status:** early. It serves one fixed page to every request, for
+one certificate given on the command line:
+
+    build/pogemini -cert server.crt -key server.key [-port 1965]
+
+[PLAN.md](PLAN.md) has the design and the roadmap, and
+[AGENTS.md](AGENTS.md) the working notes.
 
 ## Requirements
 

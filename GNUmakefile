@@ -25,19 +25,23 @@ TRIPLE := $(shell $(POC) -version | sed -n 's/^target \([^ ]*\).*/\1/p')
 # The installed libraries this needs.
 DEPLIBS := polibtls posockets
 
-# Programs (src/<name>.Mod, each a main module). None yet: PLAN.md,
-# "Roadmap".
-PROGS :=
+# Programs (src/<name>.Mod, each a main module).
+PROGS := pogemini
 # Test programs (test/<name>.Mod, each a main module), run from test/.
-TESTS :=
+TESTS := TestServe
+
+# Any module may be imported by any program, so each is rebuilt when one
+# changes; poc itself recompiles only what it must.
+SRCMODS := $(wildcard src/*.Mod src/*.c)
+TESTMODS := $(wildcard test/*.Mod test/*.c)
 
 PROGBINS := $(PROGS:%=$(BUILD)/%)
 TESTBINS := $(TESTS:%=$(BUILD)/%)
 
-.PHONY: all deps test clean
+.PHONY: all deps certs test clean
 .NOTPARALLEL:
 
-all: deps $(PROGBINS) $(TESTBINS)
+all: deps $(PROGBINS) $(TESTBINS) certs
 
 # Each library in DEPLIBS must be installed, by this poc.
 deps:
@@ -52,8 +56,17 @@ deps:
 $(BUILD):
 	mkdir -p $@
 
-$(BUILD)/%: src/%.Mod | $(BUILD)
+$(PROGBINS): $(BUILD)/%: src/%.Mod $(SRCMODS) | $(BUILD)
 	cd src && $(POC) $(POCFLAGS) -library-path $(POCLIBDIR) -output-dir $(abspath $(BUILD)) -o $(abspath $@) $*.Mod
+
+$(TESTBINS): $(BUILD)/%: test/%.Mod $(TESTMODS) | $(BUILD)
+	cd test && $(POC) $(POCFLAGS) -library-path $(POCLIBDIR) -output-dir $(abspath $(BUILD)) -o $(abspath $@) $*.Mod
+
+# The tests' certificates and keys, made afresh, never committed
+# (test/make-certs.sh).
+certs: $(BUILD)/certs/self-ec.crt
+$(BUILD)/certs/self-ec.crt: test/make-certs.sh | $(BUILD)
+	sh test/make-certs.sh $(BUILD)/certs
 
 test: all
 	@status=0; for t in $(TESTS); do \
