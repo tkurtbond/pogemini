@@ -1,7 +1,7 @@
 MODULE pogemini; (* A Gemini server *)
 
-(* Usage: pogemini [-listen host] [-port port] [-deadline ms] [-n count]
-                   -cert file -key file
+(* Usage: pogemini [-host name]... [-listen host] [-port port]
+                   [-deadline ms] [-n count] -cert file -key file
 
    Serves one capsule with the certificate and key in the files given,
    on port (default 1965) at host (default: every local address, IPv6
@@ -12,15 +12,28 @@ MODULE pogemini; (* A Gemini server *)
    count, it serves that many connections, waits for them to end, and
    exits 0, for the tests; without, it serves until killed.
 
-   Phase 1 (PLAN.md): every request is answered with the same page. *)
+   A request is checked by GemRequest. One for a host other than those
+   given by -host (any, with none) or a port other than the one listened
+   on is refused, 53: this server is no proxy. An IPv6 address is given
+   without brackets (-host ::1).
 
-IMPORT Platform, Out, Err, Args, Sockets, Tls, GemServer;
+   Phase 2 (PLAN.md): every request that passes is answered with the
+   same page. *)
 
-CONST DefaultPort = 1965;
+IMPORT Platform, Out, Err, Args, Sockets, Tls, GemServer, GemRequest;
+
+CONST
+  DefaultPort = 1965;
+  MaxHosts = 16;
+
+VAR
+  hosts: ARRAY MaxHosts, 256 OF CHAR;  (* the names served, lower case *)
+  nHosts: INTEGER;
+  port: LONGINT;                       (* listened on *)
 
 PROCEDURE Usage;
 BEGIN
-  Err.String("usage: pogemini [-listen host] [-port port] [-deadline ms] [-n count] -cert file -key file");
+  Err.String("usage: pogemini [-host name]... [-listen host] [-port port] [-deadline ms] [-n count] -cert file -key file");
   Err.Ln; Platform.Exit(2)
 END Usage;
 
@@ -30,9 +43,25 @@ BEGIN
   Platform.Exit(1)
 END Fail;
 
-PROCEDURE Respond(x: GemServer.Exchange);
+(* r is for this server: its host and port. *)
+PROCEDURE Ours(VAR r: GemRequest.Request): BOOLEAN;
+  VAR i: INTEGER;
 BEGIN
-  IF x.Header(20, "text/gemini") & x.WriteString("# pogemini") & x.WriteString(0AX)
+  IF r.port # port THEN RETURN FALSE END;
+  IF nHosts = 0 THEN RETURN TRUE END;
+  i := 0; WHILE (i < nHosts) & (hosts[i] # r.host) DO INC(i) END;
+  RETURN i < nHosts
+END Ours;
+
+PROCEDURE Respond(x: GemServer.Exchange);
+  VAR r: GemRequest.Request; why: ARRAY 128 OF CHAR; status: INTEGER;
+BEGIN
+  status := GemRequest.Parse(x.request, r, why);
+  IF status # GemRequest.Ok THEN
+    IF x.Header(status, why) THEN END
+  ELSIF ~Ours(r) THEN
+    IF x.Header(GemRequest.Refused, "not served here") THEN END
+  ELSIF x.Header(20, "text/gemini") & x.WriteString("# pogemini") & x.WriteString(0AX)
     & x.WriteString(0AX)
     & x.WriteString("This server is running, but serves no files yet.") & x.WriteString(0AX) THEN
   END
@@ -53,15 +82,28 @@ BEGIN
 END Context;
 
 PROCEDURE Main;
-  VAR arg, host, cert, key: ARRAY 1024 OF CHAR; port, deadline, count: LONGINT;
-    i: INTEGER; s: GemServer.Server; err: Sockets.Error;
+  VAR arg, host, cert, key: ARRAY 1024 OF CHAR; deadline, count: LONGINT;
+    i, j: INTEGER; s: GemServer.Server; err: Sockets.Error;
 BEGIN
-  host := ""; cert := ""; key := "";
+  host := ""; cert := ""; key := ""; nHosts := 0;
   port := DefaultPort; deadline := GemServer.DefaultDeadline; count := 0;
   i := 1;
   WHILE i < Args.argc DO
     Args.Get(i, arg);
     IF i + 1 >= Args.argc THEN Usage
+    ELSIF arg = "-host" THEN
+      IF nHosts = MaxHosts THEN Usage END;
+      Args.Get(i + 1, hosts[nHosts]);
+      (* lower case, as GemRequest gives a request's host *)
+      j := 0;
+      WHILE hosts[nHosts, j] # 0X DO
+        IF (hosts[nHosts, j] >= "A") & (hosts[nHosts, j] <= "Z") THEN
+          hosts[nHosts, j] := CHR(ORD(hosts[nHosts, j]) + 32)
+        END;
+        INC(j)
+      END;
+      IF hosts[nHosts] = "" THEN Usage END;
+      INC(nHosts)
     ELSIF arg = "-listen" THEN Args.Get(i + 1, host)
     ELSIF arg = "-port" THEN port := -1; Args.GetInt(i + 1, port)
     ELSIF arg = "-deadline" THEN deadline := -1; Args.GetInt(i + 1, deadline)
@@ -79,6 +121,7 @@ BEGIN
   s := GemServer.New(Context(cert, key), Respond);
   s.SetDeadline(deadline);
   IF ~s.Listen(host, SHORT(port), err) THEN Fail("listen", err.text) END;
+  port := s.port;
   Out.String("port "); Out.Int(s.port, 0); Out.Ln;
   s.Serve(count)
 END Main;

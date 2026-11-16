@@ -12,10 +12,12 @@ serves every connection in a task of poc's cooperative `Tasks`, in one
 thread. It is meant for Linux and the BSDs (FreeBSD, OpenBSD, NetBSD)
 alike; so far it is built only on Linux.
 
-**Status:** early. It serves one fixed page to every request, for
-one certificate given on the command line:
+**Status:** early. It checks each request, refusing what the
+specification forbids, and serves one fixed page to the rest, for one
+certificate given on the command line and the host names given by
+`-host` (any, with none):
 
-    build/pogemini -cert server.crt -key server.key [-port 1965]
+    build/pogemini -cert server.crt -key server.key [-host example.org] [-port 1965]
 
 [PLAN.md](PLAN.md) has the design and the roadmap, and
 [AGENTS.md](AGENTS.md) the working notes.

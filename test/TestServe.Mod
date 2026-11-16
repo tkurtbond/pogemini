@@ -19,7 +19,6 @@ CONST
   Deadline = 1000;  (* the server's, ms: short, for the silent clients *)
   Count = 10;       (* the connections Test makes *)
   CR = 0DX; LF = 0AX;
-  Home = "gemini://localhost/";
   (* The test's tasks pass whole responses (64 KiB) by value, to
      Check.Contains, so they need more than TlsTasks.stackSize. *)
   StackSize = 1024 * 1024;
@@ -30,6 +29,7 @@ TYPE
 
 VAR
   hash: ARRAY 128 OF CHAR;  (* client1-ec.crt's, as the log gives it *)
+  home: ARRAY 64 OF CHAR;   (* gemini://localhost:<the server's port>/ *)
   longest: ARRAY 1100 OF CHAR;  (* a URL of 1024 bytes, the most there may be *)
 
 PROCEDURE Length(s: ARRAY OF CHAR): LONGINT;
@@ -124,12 +124,12 @@ PROCEDURE (t: Test) Run*;
     silent: GemClient.Conn; tcp: Sockets.Socket; err: Sockets.Error;
     error: ARRAY 256 OF CHAR; buf: ARRAY 16 OF CHAR;
 BEGIN
-  r := Fetch("127.0.0.1", t.port, Home, "", "");
+  r := Fetch("127.0.0.1", t.port, home, "", "");
   Expect(r, "20 text/gemini", "IPv4: 20 text/gemini");
   Check.Check(Check.Contains(r.data^, "# pogemini"), "IPv4: the page");
-  r := Fetch("::1", t.port, Home, "", "");
+  r := Fetch("::1", t.port, home, "", "");
   Expect(r, "20 text/gemini", "IPv6: 20 text/gemini");
-  r := Fetch("127.0.0.1", t.port, Home, Client1Crt, Client1Key);
+  r := Fetch("127.0.0.1", t.port, home, Client1Crt, Client1Key);
   Expect(r, "20 text/gemini", "with a client certificate: 20 text/gemini");
 
   (* The longest request there may be is served, and one byte longer
@@ -143,9 +143,9 @@ BEGIN
   r := GemClient.Fetch("127.0.0.1", t.port, req, 1100, "", "");
   Expect(r, "59 request too long, or no CR LF", "1100 bytes without CR LF: 59");
 
-  req := "gemini://localhost/a"; Append(req, 09X); Append(req, "b");
+  COPY(home, req); Append(req, "a"); Append(req, 09X); Append(req, "b");
   r := Fetch("127.0.0.1", t.port, req, "", "");
-  Expect(r, "20 text/gemini", "a control character in the request: 20");
+  Expect(r, "59 a character not allowed in a URL", "a control character in the request: 59");
 
   (* Two clients that say nothing: one connects and makes no handshake,
      the other makes one and sends no request. Neither holds up a
@@ -159,7 +159,7 @@ BEGIN
     Check.Check(FALSE, "a silent TLS client connects"); Out.String("  "); Out.String(error); Out.Ln;
     silent := NIL
   END;
-  r := Fetch("127.0.0.1", t.port, Home, "", "");
+  r := Fetch("127.0.0.1", t.port, home, "", "");
   Expect(r, "20 text/gemini", "served while two clients say nothing");
   Check.Check(Platform.Time() - start < Deadline, "  ... without waiting for them");
   IF silent # NIL THEN
@@ -180,7 +180,7 @@ END Run;
 PROCEDURE (t: Rsa) Run*;
   VAR r: GemClient.Response;
 BEGIN
-  r := Fetch("127.0.0.1", t.port, Home, "", "");
+  r := Fetch("127.0.0.1", t.port, home, "", "");
   Expect(r, "20 text/gemini", "RSA: 20 text/gemini")
 END Run;
 
@@ -206,6 +206,9 @@ BEGIN
   p := 0; i := 5;
   WHILE (line[i] >= "0") & (line[i] <= "9") DO p := p * 10 + ORD(line[i]) - ORD("0"); INC(i) END;
   port := SHORT(p);
+  home := "gemini://localhost:"; n[0] := 0X; i := 5;
+  WHILE (line[i] >= "0") & (line[i] <= "9") DO n[i - 5] := line[i]; INC(i) END;
+  n[i - 5] := "/"; n[i - 4] := 0X; Append(home, n);
   RETURN (p > 0) & (p <= 65535)
 END Start;
 
@@ -227,24 +230,25 @@ PROCEDURE Main;
     log: ARRAY 65536 OF CHAR; line: ARRAY 1200 OF CHAR;
 BEGIN
   Hash(Client1Crt, hash);
-  longest := Home; FOR i := Length(Home) TO 1023 DO longest[i] := "a" END; longest[1024] := 0X;
-
   IF ~Start("ec", Count, c, port) THEN
     Check.Check(FALSE, "the server starts and says its port");
     IF Child.Wait(c, log, i) # 0 THEN END; Out.String(log); Out.Ln
   ELSE
+    COPY(home, longest); FOR i := Length(home) TO 1023 DO longest[i] := "a" END; longest[1024] := 0X;
     NEW(t); t.port := port; Tasks.Start(t, StackSize); Tasks.Join(t);
     Check.Check(Child.Wait(c, log, i) = 0, "the server exits 0 after its connections");
     Check.Check(Occurs(log, LF) = Count, "  ... with a line for each");
-    Check.Check(Lines(log, "127.0.0.1 20 gemini://localhost/ -") = 2, "log: IPv4, no certificate");
-    Check.Check(Lines(log, "::1 20 gemini://localhost/ -") = 1, "log: IPv6");
-    line := "127.0.0.1 20 gemini://localhost/ "; Append(line, hash);
+    line := "127.0.0.1 20 "; Append(line, home); Append(line, " -");
+    Check.Check(Lines(log, line) = 2, "log: IPv4, no certificate");
+    line := "::1 20 "; Append(line, home); Append(line, " -");
+    Check.Check(Lines(log, line) = 1, "log: IPv6");
+    line := "127.0.0.1 20 "; Append(line, home); Append(line, " "); Append(line, hash);
     Check.Check(Lines(log, line) = 1, "log: the client certificate's hash");
     line := "127.0.0.1 20 "; Append(line, longest); Append(line, " -");
     Check.Check(Lines(log, line) = 1, "log: the longest request, whole");
     Check.Check(Lines(log, "127.0.0.1 59 - -") = 2, "log: the two refused");
-    Check.Check(Lines(log, "127.0.0.1 20 gemini://localhost/a%09b -") = 1,
-      "log: the control character escaped");
+    line := "127.0.0.1 59 "; Append(line, home); Append(line, "a%09b -");
+    Check.Check(Lines(log, line) = 1, "log: the control character escaped");
     Check.Check(Lines(log, "127.0.0.1 failed: handshake timed out") = 1,
       "log: the silent TCP client timed out");
     Check.Check(Lines(log, "127.0.0.1 failed: read timed out") = 1,

@@ -15,9 +15,12 @@ starting point.
 
 ## Status
 
-As of 2026-11-16, Phases 0 and 1 of PLAN.md are done: `src/GemServer`
+As of 2026-11-16, Phases 0 to 2 of PLAN.md are done: `src/GemServer`
 and `src/pogemini` serve a fixed page, tested by `TestServe` with our
-own client. Next is Phase 2, requests.
+own client, and `src/GemRequest` parses and checks each request
+(`TestParse` on its own, `TestRequests` through the server, with
+openssl s_client, OpenBSD's nc, gemget and gnutls-cli as clients).
+Next is Phase 3, configuration.
 
 **poc 0.13.0 or later, and polibtls and posockets built by the same
 poc.** A poc library works only with the poc that built it. Both were
@@ -57,6 +60,11 @@ so it exits by itself, and its log, the rest of its output, checked
 after `Child.Wait`. `test/GemClient.Mod` is the client, in tasks, with a
 deadline of its own. A test task that passes a whole response by value
 needs a bigger stack than `TlsTasks.stackSize` (PLAN.md, Phase 1).
+Tests import `src/` modules (`-import-path ../src`), so a module can be
+tested on its own, as `TestParse` tests `GemRequest`. `TestRequests`
+finds the other clients as polibtls's `TestGemini` does (`$OPENSSL`,
+`$LIBTLS_NC`, `$GEMGET`, `$GNUTLS_CLI`, else on `PATH`) and skips, saying
+so, a client it can't find.
 
 ## Conventions
 

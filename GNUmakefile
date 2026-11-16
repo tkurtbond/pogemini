@@ -28,7 +28,7 @@ DEPLIBS := polibtls posockets
 # Programs (src/<name>.Mod, each a main module).
 PROGS := pogemini
 # Test programs (test/<name>.Mod, each a main module), run from test/.
-TESTS := TestServe
+TESTS := TestParse TestServe TestRequests
 
 # Any module may be imported by any program, so each is rebuilt when one
 # changes; poc itself recompiles only what it must.
@@ -60,7 +60,7 @@ $(PROGBINS): $(BUILD)/%: src/%.Mod $(SRCMODS) | $(BUILD)
 	cd src && $(POC) $(POCFLAGS) -library-path $(POCLIBDIR) -output-dir $(abspath $(BUILD)) -o $(abspath $@) $*.Mod
 
 $(TESTBINS): $(BUILD)/%: test/%.Mod $(TESTMODS) | $(BUILD)
-	cd test && $(POC) $(POCFLAGS) -library-path $(POCLIBDIR) -output-dir $(abspath $(BUILD)) -o $(abspath $@) $*.Mod
+	cd test && $(POC) $(POCFLAGS) -import-path ../src -library-path $(POCLIBDIR) -output-dir $(abspath $(BUILD)) -o $(abspath $@) $*.Mod
 
 # The tests' certificates and keys, made afresh, never committed
 # (test/make-certs.sh).

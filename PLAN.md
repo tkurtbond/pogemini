@@ -69,12 +69,18 @@ written so as not to need changing for them:
 
 ## Gemini's requirements
 
-From the specification (polibtls's AGENTS.md, "Reference material");
-to be re-read before Phase 2, and corrected here where this is wrong:
+From the specification (0.24.1, polibtls's AGENTS.md, "Reference
+material"), re-read for Phase 2:
 
-- The request is an absolute URI, at most 1024 bytes, then CR LF; it
-  must not begin with a byte order mark, and has no userinfo or
-  fragment.
+- The request is an absolute URI, at most 1024 bytes, then CR LF; a
+  server must reject one longer, or with userinfo or a fragment, and
+  must treat an empty path as "/", without a redirect. The port is 1965
+  if none is given. (The rule against a byte order mark is the
+  response header's and a text body's; a request beginning with one is
+  no absolute URI anyway.)
+- Status 53, proxy request refused, is for a request for a resource
+  this server doesn't serve: another host, port or scheme. 59, bad
+  request, for one it can't parse or that breaks the rules above.
 - The response header is a two-digit status, a space and its meta, CR
   LF; only a 2x response has a body, ended by the server closing the
   connection with TLS close_notify.
@@ -188,12 +194,47 @@ Found on the way (poc 0.13.0):
 - **poc has no string concatenation** (`"a" + "b"` is an error), and
   won't assign a string constant to an open array: use `COPY`.
 
-### Phase 2: requests
+### Phase 2: requests [done]
 
 Parsing and validating the request URL (scheme, host, port, path,
 percent-encoding, the limits above), statuses 59 and 53, and the path
 normalised (`.` and `..` resolved) before it goes anywhere near the
 file system.
+
+Done 2026-11-16: `src/GemRequest.Mod`, `Parse(url, r, why)`, giving
+`Ok`, 59 or 53 and a reason that becomes the response's meta;
+`pogemini` refuses with 53 a host not given by `-host` (any, with none,
+for now) or a port other than the one it listens on. Decided:
+
+- **Characters**: RFC 3986's, plus non-ASCII as UTF-8, as an IRI has
+  them (RFC 3987), since some clients send them raw; malformed UTF-8
+  (overlong, surrogates, over U+10FFFF, cut short) is refused, raw or
+  percent-encoded in the path. A space, a control character, `\`, `"`,
+  `<`, `>`, `^`, `` ` ``, `{`, `|`, `}` are refused.
+- **Scheme**: checked first, so `mailto:x` is a 53, not a 59.
+- **Host**: lower case, percent-decoded, a final `.` dropped; an IPv6
+  literal without its brackets. Punycode is left as it is (an open
+  question below).
+- **Path**: decoded segment by segment, then `.` and `..` resolved, so
+  `%2E%2E` is `..`; empty segments dropped; a trailing `/` kept, since it
+  names a directory (Phase 4). Refused (59), rather than clamped at the
+  root as RFC 3986 does: `..` above `/`, and a segment decoding to `/`,
+  a control character (NUL included) or malformed UTF-8. None names a
+  file a server should serve, and refusing here spares Phase 4 from
+  having to remember. `rawPath` keeps the path as sent, for redirects.
+- **Query**: kept as sent, percent-encoding checked; `Decode` decodes it
+  for a responder (1x input).
+- **Port**: the request's must be the one listened on. Behind a port
+  forward the two differ; Phase 3's configuration may need a public
+  port.
+- **SNI** isn't compared with the request's host: the specification
+  doesn't ask it, and Phase 3 picks a capsule by the request's host.
+
+Tests: `TestParse` (GemRequest alone, 82 checks) and `TestRequests` (the
+server, by GemClient: hosts written several ways, 53s, 59s, then
+openssl s_client, OpenBSD's nc, gemget and gnutls-cli each getting the
+page, and the log counted by status). `TestServe`'s URLs now carry the
+port, and its control character is a 59.
 
 ### Phase 3: configuration
 
@@ -255,7 +296,10 @@ the BSDs.
 - ~~Which libtls on FreeBSD and NetBSD: LibreTLS from ports/pkgsrc, or
   LibreSSL's?~~ LibreTLS, from packages; OpenBSD's own in base
   (polibtls's Phase 10, 2026-11-16).
-- Internationalised host names (punycode) and IRIs in requests.
+- Internationalised host names: should `bücher.example` in a request
+  match a capsule named `xn--bcher-kva.example`, and the other way
+  round? (~~IRIs in requests~~: their non-ASCII characters are accepted
+  as UTF-8, Phase 2.)
 - ~~A test client: our own module in `test/`, or polibtls's
   `GeminiFetch` (an example, not installed)?~~ Our own in `test/`
   (2026-11-16, with the user): "Design".
