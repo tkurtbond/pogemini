@@ -24,8 +24,12 @@ TYPE
     ok-: BOOLEAN;      (* read to the server's close_notify *)
     data-: POINTER TO ARRAY OF CHAR;  (* the response, 0X-terminated *)
     len-: LONGINT;
-    error-: ARRAY ErrorLen OF CHAR    (* why not ok *)
+    error-: ARRAY ErrorLen OF CHAR;   (* why not ok *)
+    serverHash-: ARRAY 80 OF CHAR     (* the server certificate's, "" if none *)
   END;
+
+VAR
+  servername*: ARRAY 256 OF CHAR;  (* sent as SNI; "localhost" at first *)
 
 (* A TLS connection to host and port, handshake made, presenting the
    client certificate in cert and key, or none for "". *)
@@ -42,7 +46,7 @@ BEGIN
   IF ~SocketTasks.Connect(host, port, Deadline, s, err) THEN
     COPY(err.text, error); cfg.Close; RETURN FALSE
   END;
-  IF ~Tls.ConnectSocket(cfg, s.fd, "localhost", conn) THEN
+  IF ~Tls.ConnectSocket(cfg, s.fd, servername, conn) THEN
     COPY(conn.error.text^, error); cfg.Close; Sockets.Close(s); RETURN FALSE
   END;
   cfg.Close;
@@ -67,7 +71,7 @@ END Send;
 PROCEDURE Receive*(c: Conn): Response;
   VAR r: Response; m: LONGINT;
 BEGIN
-  NEW(r); NEW(r.data, MaxResponse + 1); r.len := 0; r.ok := FALSE; r.error := "";
+  NEW(r); NEW(r.data, MaxResponse + 1); r.len := 0; r.ok := FALSE; r.error := ""; r.serverHash := "";
   LOOP
     IF r.len = MaxResponse THEN r.error := "response too long"; EXIT
     ELSIF TlsTasks.Read(c.c, r.data^, r.len, MaxResponse - r.len, m) THEN INC(r.len, m)
@@ -90,14 +94,17 @@ END Close;
    its own. *)
 PROCEDURE Fetch*(host: ARRAY OF CHAR; port: INTEGER; request: ARRAY OF CHAR;
     len: LONGINT; cert, key: ARRAY OF CHAR): Response;
-  VAR c: Conn; r: Response;
+  VAR c: Conn; r: Response; h: Tls.String;
 BEGIN
-  NEW(r); r.ok := FALSE; r.len := 0; NEW(r.data, 1); r.data[0] := 0X;
+  NEW(r); r.ok := FALSE; r.len := 0; NEW(r.data, 1); r.data[0] := 0X; r.serverHash := "";
   IF Open(host, port, cert, key, c, r.error) THEN
     IF Send(c, request, len, r.error) THEN r := Receive(c) END;
+    h := c.c.PeerCertHash(); IF h # NIL THEN COPY(h^, r.serverHash) ELSE r.serverHash := "" END;
     Close(c)
   END;
   RETURN r
 END Fetch;
 
+BEGIN
+  servername := "localhost"
 END GemClient.

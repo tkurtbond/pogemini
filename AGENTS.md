@@ -15,12 +15,16 @@ starting point.
 
 ## Status
 
-As of 2026-11-16, Phases 0 to 2 of PLAN.md are done: `src/GemServer`
-and `src/pogemini` serve a fixed page, tested by `TestServe` with our
-own client, and `src/GemRequest` parses and checks each request
-(`TestParse` on its own, `TestRequests` through the server, with
-openssl s_client, OpenBSD's nc, gemget and gnutls-cli as clients).
-Next is Phase 3, configuration.
+As of 2026-11-16, Phases 0 to 3 of PLAN.md are done: `src/GemServer`
+and `src/pogemini` serve a page naming the capsule asked for, tested by
+`TestServe` with our own client; `src/GemRequest` parses and checks each
+request (`TestParse` on its own, `TestRequests` through the server, with
+openssl s_client, OpenBSD's nc, gemget and gnutls-cli as clients); and
+`src/GemConfig` reads the configuration file and `src/GemCert` makes a
+self-signed certificate for a capsule given none (`TestConfig` on its
+own, `TestCapsules` through the server: SNI and hosts picking capsules,
+a made certificate reused, and what stops the server). Next is Phase 4,
+serving files.
 
 **poc 0.13.0 or later, and polibtls and posockets built by the same
 poc.** A poc library works only with the poc that built it. Both were
@@ -64,7 +68,13 @@ Tests import `src/` modules (`-import-path ../src`), so a module can be
 tested on its own, as `TestParse` tests `GemRequest`. `TestRequests`
 finds the other clients as polibtls's `TestGemini` does (`$OPENSSL`,
 `$LIBTLS_NC`, `$GEMGET`, `$GNUTLS_CLI`, else on `PATH`) and skips, saying
-so, a client it can't find.
+so, a client it can't find. `GemClient.servername` is the SNI it sends
+(a numeric address sends none), and a response carries the server
+certificate's hash. A test that needs files of its own (a configuration,
+a certificate directory) makes them under `build/test-<name>`, afresh,
+and removes them at the end; nothing a test runs may fall back to
+`~/.local/share/pogemini`, so give the server `-certdir` or a capsule
+with `-cert`.
 
 ## Conventions
 

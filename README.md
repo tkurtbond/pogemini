@@ -13,11 +13,26 @@ thread. It is meant for Linux and the BSDs (FreeBSD, OpenBSD, NetBSD)
 alike; so far it is built only on Linux.
 
 **Status:** early. It checks each request, refusing what the
-specification forbids, and serves one fixed page to the rest, for one
-certificate given on the command line and the host names given by
-`-host` (any, with none):
+specification forbids, and answers the rest with a page naming the
+capsule asked for; it serves no files yet. Capsules come from a
+configuration file, or one from the command line:
 
-    build/pogemini -cert server.crt -key server.key [-host example.org] [-port 1965]
+    build/pogemini -host example.org [-cert server.crt -key server.key] [-port 1965]
+    build/pogemini -config pogemini.conf
+
+A capsule given no certificate gets a self-signed one, made by
+`openssl` the first time and kept in `~/.local/share/pogemini/certs`
+(or `certdir`) for later runs, since clients pin it. The file's format:
+
+    # global settings first
+    port 1965
+    certdir /var/lib/pogemini/certs
+
+    capsule example.org
+      alias www.example.org
+      root /srv/gemini/example.org
+      cert /etc/pogemini/example.org.crt
+      key /etc/pogemini/example.org.key
 
 [PLAN.md](PLAN.md) has the design and the roadmap, and
 [AGENTS.md](AGENTS.md) the working notes.

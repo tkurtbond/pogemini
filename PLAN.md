@@ -146,6 +146,7 @@ this server that asserts a programmer's error uses 100..109:
 | 102 | GemServer | `Write` without a 2x header first |
 | 103 | GemServer | a `Responder` returned without a header |
 | 104 | GemServer | `Serve` before `Listen` |
+| 105 | GemCert | `Ensure` for a capsule with no name, or with a certificate or key |
 
 ## Testing
 
@@ -236,7 +237,7 @@ openssl s_client, OpenBSD's nc, gemget and gnutls-cli each getting the
 page, and the log counted by status). `TestServe`'s URLs now carry the
 port, and its control character is a 59.
 
-### Phase 3: configuration
+### Phase 3: configuration [done]
 
 The configuration file and command-line options ("Design"): capsules
 (host, certificate, key, document root), listen addresses and port,
@@ -246,6 +247,69 @@ for a capsule given none. The certificate must be made as polibtls's
 have, and `-sha256` named, since LibreSSL's `x509 -req` signs with
 SHA-1 by default, which GnuTLS rejects (polibtls's AGENTS.md, "From the
 port").
+
+Decided, 2026-11-16 (`GemConfig`, `GemCert`, `pogemini`):
+
+- **The file** is a line per setting, `keyword value`; `#` at the start
+  of a word begins a comment; blank lines are ignored. A value is the
+  rest of the line, trimmed, so a file name may hold spaces (and a `#`
+  not after a space); a name or number is one word. Global settings
+  (`listen`, `port`, `deadline`, `certdir`) come first; `capsule name`
+  begins a capsule, and `alias`, `root`, `cert` and `key` after it are
+  its own. A mistake is reported as `file:line: reason`, and the server
+  exits 1 (2 for a mistake in the options, with the usage).
+- **Capsule names** are kept in lower case and must be DNS names
+  (letters, digits, hyphens, labels of 1 to 63, no final dot) or IP
+  addresses written plainly (`::1`): they name files and go to
+  `openssl`'s command line, so nothing else is let through, non-ASCII
+  included (the punycode question stays open). A name or alias may
+  belong to one capsule only.
+- **The command line** overrides the file's global settings, and its
+  capsule options make one more capsule, put first: its name is the
+  first `-host`, the others its aliases, with `-root`, `-cert`, `-key`.
+  Without `-host` it is a capsule for any host, answering what no named
+  capsule has (as Phases 1 and 2 did); it needs `-cert` and `-key`, and
+  has no aliases.
+- **Choosing a capsule**: by the request's host, among names and
+  aliases, else the capsule for any host, else 53. libtls chooses the
+  key pair by SNI against each certificate's names, the first pair for
+  a client that sends none (or a name no certificate has), so the
+  first capsule is the default; all the pairs go into one `Tls.Config`
+  (`SetKeypairFile`, then `AddKeypairFile`). An alias that a supplied
+  certificate doesn't name is answered by its capsule, but over the
+  first capsule's certificate (`TestCapsules`, www.other.example).
+- **Made certificates** (`GemCert`): for a capsule with neither `cert`
+  nor `key`, `<certdir>/<name>.crt` and `.key`, made once and then used
+  as they are, since clients pin them (TOFU). `certdir` defaults to
+  `$XDG_DATA_HOME/pogemini/certs`, else `~/.local/share/pogemini/certs`.
+  ECDSA P-256, `-sha256`, 3650 days, CN the name and subject
+  alternative names the name and aliases (`IP:` for an address), made
+  by `openssl genpkey` and `req -x509` with a configuration of its own,
+  as `make-certs.sh` does, under `umask 077` in a directory made by
+  `mkdir -p`, then the certificate `chmod 644`. Written under temporary
+  names and renamed key first, certificate last, so a pair is complete
+  exactly when its `.crt` exists: a `.key` alone is made again, a
+  `.crt` alone is refused. The directory's name may not hold a `'`,
+  since it is quoted for the shell. Without `openssl` on `PATH`, the
+  server says so and exits 1. Made before the server listens, so a
+  slow `openssl` only delays the start.
+- **A capsule's root** must be a directory if given; Phase 4 serves it.
+- **Not done here**: `listen` takes one address (or all), as
+  `GemServer.Listen` does; logging stays as Phase 1's, for Phase 6; a
+  public port differing from the one listened on (behind a port
+  forward) isn't configurable yet, and a request's port must still be
+  the listened one.
+
+Tests: `TestConfig` (GemConfig alone: a file with every setting, CR LF
+lines, 21 mistakes each refused with its line and reason, and a
+missing file) and
+`TestCapsules` (the server with three capsules from a file: pages and
+certificates chosen by host and SNI, the default certificate without
+SNI, a certificate made for one and reused on a second run, its key
+mode 600, `-cert` alone as a capsule for any host; then a mistake in
+the file, a missing file, a lone `.crt`, a root that isn't a
+directory, a certificate without its key, `openssl` missing, no capsule,
+and a mismatched key pair, each stopping it with its reason).
 
 ### Phase 4: serving files
 
