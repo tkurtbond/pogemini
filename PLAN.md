@@ -311,11 +311,62 @@ the file, a missing file, a lone `.crt`, a root that isn't a
 directory, a certificate without its key, `openssl` missing, no capsule,
 and a mismatched key pair, each stopping it with its reason).
 
-### Phase 4: serving files
+### Phase 4: serving files [done]
 
 Files under a capsule's root, the MIME type by extension, `index.gmi`
 for a directory, 31 to add a directory's slash, 51 for none; symlinks
 out of the root refused; large files sent in pieces.
+
+Done 2026-11-16: `src/GemFiles.Mod`, with a C part, `src/GemFiles.c`
+(`realpath`, `open`, `fstat`, `read`: POSIX, the same on the BSDs).
+Decided:
+
+- **What is served**: regular files only. A directory asked for with
+  a final `/` gives its `index.gmi`, or 51: no listings. Without the
+  `/`, 31 to the path as sent (`rawPath`) with `/` added, the query
+  kept, as a reference relative to the request, so its index's links
+  resolve against the directory. An empty path is `/`, served without a
+  redirect, as the specification requires.
+- **Hidden names**: a segment beginning with `.` is refused (51),
+  in the request and in the resolved path (so a link to `.git/config`
+  is refused too). By Unix custom such names are not for publishing,
+  and `.git` is the usual leak.
+- **Symbolic links**: followed while they stay inside the root, refused
+  (51) when they lead out. The root is resolved once at start (it may
+  itself be a link), each file's path resolved by `realpath` and
+  compared with it, and the file opened by its resolved path with
+  `O_NOFOLLOW`. A directory above it swapped for a link between the two
+  could still lead out; only someone who can write under the root can
+  do that, and they can already change what is served. Recorded in
+  GemFiles's comment.
+- **Everything not served is 51 "not found"**: not there, outside the
+  root, hidden, unreadable (`EACCES`), not a regular file (a FIFO is
+  opened with `O_NONBLOCK`, so it can't stop the server, then refused).
+  A client learns nothing of what exists. A failure of the server's
+  own (too many files open, an I/O error) is 40.
+- **MIME types**: a fixed table by extension, case-insensitive,
+  `application/octet-stream` for the rest; no `charset`, since the
+  specification makes UTF-8 the default for text. Configurable types
+  and `lang=` are left for later.
+- **Large files** go in 16 KiB pieces read into a heap buffer, not the
+  task's stack. A read from disk blocks every task while it lasts,
+  accepted as short beside the network. A read that fails part way
+  leaves the client a response ended as if complete: Gemini has no way
+  to say otherwise.
+- **A capsule without a root** answers `/` with a page naming it and
+  anything else 51, so tests that need no files give none.
+- No descriptor is left open: 100 requests of each kind left the
+  server's count of open descriptors as it was (checked by hand, on
+  Linux's `/proc`, not in a test).
+
+Tests: `TestFiles` (a root given by a link to it: types by extension,
+names with a space or not ASCII, a 1 MiB file whole, by GemClient and
+`openssl s_client`; directories with and without `/`, a query kept in
+the redirect; links in and out of the root, to files and directories;
+hidden names, also percent-encoded and through a link; a FIFO; a file it
+can't read, unless run as root; and a capsule without a root). `TestServe`'s
+longest request is now answered 51, there being no such file, and
+`TestRequests`'s other clients ask for `/?<client>`.
 
 ### Phase 5: client certificates
 

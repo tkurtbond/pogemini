@@ -208,6 +208,7 @@ BEGIN
   IF Platform.System("rm -rf ../build/test-capsules && mkdir -p ../build/test-capsules/root") # 0 THEN
     Check.Check(FALSE, "make ../build/test-capsules"); Check.Summary; RETURN
   END;
+  Write("../build/test-capsules/root/index.gmi", "# localhost|This capsule is localhost.|");
   CertHash("../build/certs/self-ec.crt", selfEc);
   CertHash("../build/certs/self-rsa.crt", selfRsa);
   CertHash("../build/certs/other-rsa.crt", otherRsa);

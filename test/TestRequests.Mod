@@ -198,24 +198,24 @@ BEGIN
     cmd := "exec "; Append(cmd, openssl);
     Append(cmd, " s_client -quiet -servername localhost -connect 127.0.0.1:");
     Append(cmd, portText);
-    Url("openssl", req); i := Length(req); req[i] := CR; req[i + 1] := LF; req[i + 2] := 0X;
+    Url("?openssl", req); i := Length(req); req[i] := CR; req[i + 1] := LF; req[i + 2] := 0X;
     Client("openssl s_client: the page", cmd, req)
   END;
   IF nc # "" THEN
     cmd := "exec "; Append(cmd, nc); Append(cmd, " -c -T noverify -e localhost 127.0.0.1 ");
     Append(cmd, portText);
-    Url("nc", req); i := Length(req); req[i] := CR; req[i + 1] := LF; req[i + 2] := 0X;
+    Url("?nc", req); i := Length(req); req[i] := CR; req[i + 1] := LF; req[i + 2] := 0X;
     Client("nc -c (libtls): the page", cmd, req)
   END;
   IF gemget # "" THEN
     cmd := "exec "; Append(cmd, gemget); Append(cmd, " -o - --header ");
-    Url("gemget", url); Append(cmd, url);
+    Url("?gemget", url); Append(cmd, url);
     Client("gemget (Go): the page", cmd, "")
   END;
   IF gnutlsCli # "" THEN
     cmd := "exec "; Append(cmd, gnutlsCli); Append(cmd, " --logfile=/dev/null --insecure -p ");
     Append(cmd, portText); Append(cmd, " localhost");
-    Url("gnutls", req); i := Length(req); req[i] := CR; req[i + 1] := LF; req[i + 2] := 0X;
+    Url("?gnutls", req); i := Length(req); req[i] := CR; req[i + 1] := LF; req[i + 2] := 0X;
     Client("gnutls-cli (GnuTLS): the page", cmd, req)
   END
 END Others;

@@ -132,10 +132,10 @@ BEGIN
   r := Fetch("127.0.0.1", t.port, home, Client1Crt, Client1Key);
   Expect(r, "20 text/gemini", "with a client certificate: 20 text/gemini");
 
-  (* The longest request there may be is served, and one byte longer
+  (* The longest request there may be is read and answered, and one byte longer
      is refused; so is one without CR LF in the first 1026 bytes. *)
   r := Fetch("127.0.0.1", t.port, longest, "", "");
-  Expect(r, "20 text/gemini", "a 1024-byte request: 20");
+  Expect(r, "51 not found", "a 1024-byte request: read and answered (51: there is no such file)");
   COPY(longest, req); Append(req, "a");
   r := Fetch("127.0.0.1", t.port, req, "", "");
   Expect(r, "59 request too long, or no CR LF", "a 1025-byte request: 59");
@@ -244,7 +244,7 @@ BEGIN
     Check.Check(Lines(log, line) = 1, "log: IPv6");
     line := "127.0.0.1 20 "; Append(line, home); Append(line, " "); Append(line, hash);
     Check.Check(Lines(log, line) = 1, "log: the client certificate's hash");
-    line := "127.0.0.1 20 "; Append(line, longest); Append(line, " -");
+    line := "127.0.0.1 51 "; Append(line, longest); Append(line, " -");
     Check.Check(Lines(log, line) = 1, "log: the longest request, whole");
     Check.Check(Lines(log, "127.0.0.1 59 - -") = 2, "log: the two refused");
     line := "127.0.0.1 59 "; Append(line, home); Append(line, "a%09b -");

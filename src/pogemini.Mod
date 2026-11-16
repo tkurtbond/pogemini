@@ -31,11 +31,11 @@ MODULE pogemini; (* A Gemini server *)
    that names none, or for a port other than the one listened on, is
    refused, 53: this server is no proxy.
 
-   Phase 3 (PLAN.md): every request that passes is answered with a page
-   naming its capsule; Phase 4 serves its root's files. *)
+   A capsule with a root serves the files under it (GemFiles); one
+   without answers "/" with a page naming it, and anything else 51. *)
 
 IMPORT Platform, Out, Err, Args, Strings, Directories, Sockets, Tls,
-  GemServer, GemRequest, GemConfig, GemCert;
+  GemServer, GemRequest, GemConfig, GemCert, GemFiles;
 
 VAR
   config: GemConfig.Config;
@@ -77,13 +77,16 @@ BEGIN
     k := CapsuleFor(r);
     IF k = NIL THEN
       IF x.Header(GemRequest.Refused, "not served here") THEN END
+    ELSIF k.root # "" THEN GemFiles.Serve(x, k.root, r)
+    ELSIF r.path # "/" THEN
+      IF x.Header(51, "not found") THEN END
     ELSIF x.Header(20, "text/gemini") & x.WriteString("# pogemini") & x.WriteString(0AX)
       & x.WriteString(0AX) THEN
       IF k.name = "" THEN
         IF x.WriteString("This capsule serves any host.") THEN END
       ELSIF x.WriteString("This capsule is ") & x.WriteString(k.name) & x.WriteString(".") THEN
       END;
-      IF x.WriteString(0AX) & x.WriteString("It serves no files yet.") & x.WriteString(0AX) THEN END
+      IF x.WriteString(0AX) & x.WriteString("It has no root, so it serves no files.") & x.WriteString(0AX) THEN END
     END
   END
 END Respond;
@@ -92,7 +95,7 @@ END Respond;
    made in certdir if need be, and the root checked. *)
 PROCEDURE Prepare(certdir: ARRAY OF CHAR);
   VAR i: INTEGER; k: GemConfig.Capsule; why: ARRAY GemConfig.ErrorLen OF CHAR;
-    name: GemConfig.Name;
+    name: GemConfig.Name; real: GemConfig.Path;
 BEGIN
   any := NIL;
   FOR i := 0 TO config.n - 1 DO
@@ -107,8 +110,13 @@ BEGIN
       END;
       IF ~GemCert.Ensure(certdir, k, why) THEN Fail(name, why) END
     END;
-    IF (k.root # "") & ~Directories.IsDirectory(k.root) THEN
-      COPY(k.root, why); Strings.Append(" is not a directory", why); Fail(name, why)
+    IF k.root # "" THEN
+      IF ~Directories.IsDirectory(k.root) THEN
+        COPY(k.root, why); Strings.Append(" is not a directory", why); Fail(name, why)
+      ELSIF ~GemFiles.Resolve(k.root, real) THEN
+        COPY(k.root, why); Strings.Append(" can't be resolved to a path", why); Fail(name, why)
+      END;
+      COPY(real, k.root)
     END
   END
 END Prepare;

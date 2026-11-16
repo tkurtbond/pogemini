@@ -15,7 +15,7 @@ starting point.
 
 ## Status
 
-As of 2026-11-16, Phases 0 to 3 of PLAN.md are done: `src/GemServer`
+As of 2026-11-16, Phases 0 to 4 of PLAN.md are done: `src/GemServer`
 and `src/pogemini` serve a page naming the capsule asked for, tested by
 `TestServe` with our own client; `src/GemRequest` parses and checks each
 request (`TestParse` on its own, `TestRequests` through the server, with
@@ -23,8 +23,11 @@ openssl s_client, OpenBSD's nc, gemget and gnutls-cli as clients); and
 `src/GemConfig` reads the configuration file and `src/GemCert` makes a
 self-signed certificate for a capsule given none (`TestConfig` on its
 own, `TestCapsules` through the server: SNI and hosts picking capsules,
-a made certificate reused, and what stops the server). Next is Phase 4,
-serving files.
+a made certificate reused, and what stops the server); and
+`src/GemFiles` (with its C part, `src/GemFiles.c`) serves the files
+under a capsule's root (`TestFiles`: MIME types, directories and
+redirects, links in and out of the root, hidden names, a FIFO, a large
+file). Next is Phase 5, client certificates.
 
 **poc 0.13.0 or later, and polibtls and posockets built by the same
 poc.** A poc library works only with the poc that built it. Both were
@@ -74,7 +77,9 @@ certificate's hash. A test that needs files of its own (a configuration,
 a certificate directory) makes them under `build/test-<name>`, afresh,
 and removes them at the end; nothing a test runs may fall back to
 `~/.local/share/pogemini`, so give the server `-certdir` or a capsule
-with `-cert`.
+with `-cert`. A capsule without a root answers only `/`, with a page
+naming it, so tests that need no files give none. `GemClient`'s
+responses grow as they come, up to 16 MiB.
 
 ## Conventions
 

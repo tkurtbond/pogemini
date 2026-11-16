@@ -11,7 +11,7 @@ IMPORT Sockets, SocketTasks, Tls, TlsTasks;
 
 CONST
   Deadline* = 5000;   (* ms a connection has, at most *)
-  MaxResponse = 65536;
+  MaxResponse = 16 * 1024 * 1024;
   ErrorLen = 256;
 
 TYPE
@@ -20,9 +20,11 @@ TYPE
     c: Tls.Connection
   END;
 
+  Data* = POINTER TO ARRAY OF CHAR;
+
   Response* = POINTER TO RECORD
     ok-: BOOLEAN;      (* read to the server's close_notify *)
-    data-: POINTER TO ARRAY OF CHAR;  (* the response, 0X-terminated *)
+    data-: Data;  (* the response, 0X-terminated *)
     len-: LONGINT;
     error-: ARRAY ErrorLen OF CHAR;   (* why not ok *)
     serverHash-: ARRAY 80 OF CHAR     (* the server certificate's, "" if none *)
@@ -67,14 +69,20 @@ BEGIN
   COPY(c.c.error.text^, error); RETURN FALSE
 END Send;
 
-(* Reads the response, to its end. *)
+(* Reads the response, to its end, growing r.data as it comes, up to
+   MaxResponse bytes. *)
 PROCEDURE Receive*(c: Conn): Response;
-  VAR r: Response; m: LONGINT;
+  VAR r: Response; m, i: LONGINT; d: Data;
 BEGIN
-  NEW(r); NEW(r.data, MaxResponse + 1); r.len := 0; r.ok := FALSE; r.error := ""; r.serverHash := "";
+  NEW(r); NEW(r.data, 65536 + 1); r.len := 0; r.ok := FALSE; r.error := ""; r.serverHash := "";
   LOOP
-    IF r.len = MaxResponse THEN r.error := "response too long"; EXIT
-    ELSIF TlsTasks.Read(c.c, r.data^, r.len, MaxResponse - r.len, m) THEN INC(r.len, m)
+    IF r.len = LEN(r.data^) - 1 THEN
+      IF r.len >= MaxResponse THEN r.error := "response too long"; EXIT END;
+      NEW(d, 2 * r.len + 1);
+      FOR i := 0 TO r.len - 1 DO d[i] := r.data[i] END;
+      r.data := d
+    END;
+    IF TlsTasks.Read(c.c, r.data^, r.len, LEN(r.data^) - 1 - r.len, m) THEN INC(r.len, m)
     ELSIF c.c.error.kind = Tls.closed THEN r.ok := TRUE; EXIT
     ELSE COPY(c.c.error.text^, r.error); EXIT
     END
