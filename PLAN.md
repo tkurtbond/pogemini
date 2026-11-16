@@ -128,7 +128,7 @@ Decided with the user, 2026-11-16:
   no wait between its parts so lines from different tasks never mix:
   `<address> <status> <request> <hash|->`, or `<address> failed:
   <why>`; the request has its control characters as `%XX`, so a client
-  can't forge a line. Phase 6 adds the time.
+  can't forge a line. Phase 6 added the time.
 - **`pogemini`**, the program: `-cert`, `-key`, `-port` (1965),
   `-listen` (every address), `-deadline` ms and `-n count` (for the
   tests); its first line on standard output is `port <n>`.
@@ -414,11 +414,63 @@ one, none; a missing file and a directory without `/` inside; links into
 a require; the hashes, from `openssl x509 -fingerprint`, one given in
 capitals; the log; and `-require /` on a capsule without a root).
 
-### Phase 6: running it
+### Phase 6: running it [done]
 
 Logging, a clean stop on SIGTERM (finish connections in progress),
 limits on connections at once, running under systemd, and dropping
 privileges if started as root.
+
+Done 2026-11-16: `src/GemServer.c` (signals, the time) and
+`src/GemUser` with `src/GemUser.c` (`getpwnam`, `initgroups`,
+`setgid`, `setuid`: on the BSDs too). Decided:
+
+- **The log** stays on standard output, a line per connection, each
+  now beginning with the time in UTC, `2026-11-16T12:34:56Z`, so a log
+  redirected to a file is complete; under systemd the journal adds its
+  own, which does no harm. The first line, `port <n>`, has none: it
+  is for whoever started the server. No log levels, no file of its own:
+  where it goes is the caller's choice (redirection, the journal).
+- **Stopping**: SIGTERM and SIGINT are caught by a handler of our own in
+  C that only notes the signal (a `sig_atomic_t`); each accept task
+  looks every `Tick` (200 ms), stops accepting, and closes its
+  listener, so a new client is refused at once rather than queued. The
+  connections in progress finish, bounded by their deadline; then
+  `Serve` returns and the server exits 0, having logged `stopping on
+  signal <n>, connections in progress: <k>` and `stopped`. The handler
+  is installed with `SA_RESETHAND`, so a second signal ends the server
+  at once. Platform has setters only for SIGINT, SIGQUIT and SIGILL,
+  hence the C. `Tasks.Event` could wake the accept tasks sooner, but
+  200 ms is soon enough.
+- **The limit**: at most `connections` (option `-connections`,
+  default 256, 1..100000) at once. At the limit the accept tasks wait
+  on a `Tasks.Condition` that each connection's end signals, so a
+  client waits in the kernel's listen queue, not refused. Finished
+  connections' tasks are dropped from the server's list at each accept
+  (`Tasks.Done`), so it no longer grows for as long as the server runs.
+- **Dropping privileges**: `user` (option `-user`). Started as root,
+  the server becomes the user, with its groups (`initgroups`, `setgid`,
+  `setuid`, then a check that root can't be had back) once its key
+  pairs are loaded and it listens, so keys only root may read and ports
+  below 1024 still work. Without one, as root, it refuses to start:
+  a server reading files as root is one mistake from serving any of
+  them; `-user root` keeps root for whoever really wants it. Not root,
+  `user` may name only the user it is. Self-signed certificates are
+  still made before, as root, in root's `certdir`. chroot, and
+  OpenBSD's `pledge` and `unveil`, are possible later.
+- **systemd**: `contrib/pogemini.service`, which starts it as its user
+  (`User=gemini`), so no `-user`; the made certificates in its
+  `StateDirectory` (`XDG_DATA_HOME=/var/lib`); sandboxing options; and
+  a stop by SIGTERM, which ends with `Result=success`. Checked with
+  `systemd-analyze verify`, and the stop under `systemd-run --user`
+  (2026-11-16), not as a system service, which needs root.
+
+Tests: `TestConfig` (`connections` and `user`, four mistakes), `TestRun`
+(SIGTERM with a client mid-exchange: a new client refused on IPv4 and
+IPv6, the one in progress answered, exit 0 and the two lines; SIGINT
+with none; `-connections 1` making a second client wait for a silent
+first, `-connections 2` not; the time on every line; `-user` as the
+user it is, root and an unknown user refused, and, only as root, no
+`-user` refused), and `TestServe`'s exact lines read after the time.
 
 ### Phase 7: the BSDs
 

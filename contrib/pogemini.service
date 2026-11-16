@@ -1,0 +1,40 @@
+# pogemini under systemd: copy to /etc/systemd/system/, adjust the paths,
+# make the user (useradd --system --home-dir /var/lib/pogemini gemini),
+# then: systemctl daemon-reload; systemctl enable --now pogemini.
+#
+# systemd starts it as the user itself, so it needs no -user. Its log,
+# standard output, goes to the journal (journalctl -u pogemini). A stop
+# sends SIGTERM: it stops accepting at once and waits for the connections
+# in progress, which its deadline bounds (10 s by default), so
+# TimeoutStopSec need only exceed that.
+
+[Unit]
+Description=pogemini, a Gemini server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=gemini
+Group=gemini
+ExecStart=/usr/local/bin/pogemini -config /etc/pogemini.conf
+Restart=on-failure
+TimeoutStopSec=30
+# Made certificates are kept here, unless the configuration's certdir
+# says otherwise; the capsules' roots need only be readable by gemini.
+StateDirectory=pogemini
+Environment=XDG_DATA_HOME=/var/lib
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=yes
+LimitNOFILE=4096
+
+[Install]
+WantedBy=multi-user.target

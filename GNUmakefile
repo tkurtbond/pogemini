@@ -28,7 +28,7 @@ DEPLIBS := polibtls posockets
 # Programs (src/<name>.Mod, each a main module).
 PROGS := pogemini
 # Test programs (test/<name>.Mod, each a main module), run from test/.
-TESTS := TestParse TestConfig TestServe TestRequests TestCapsules TestFiles TestCerts
+TESTS := TestParse TestConfig TestServe TestRequests TestCapsules TestFiles TestCerts TestRun
 
 # Any module may be imported by any program, so each is rebuilt when one
 # changes; poc itself recompiles only what it must.

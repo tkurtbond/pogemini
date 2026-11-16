@@ -12,20 +12,34 @@ MODULE GemServer; (* Listeners, and a task per connection *)
    answers with Header and Write. Then the task ends the response with
    TLS close_notify, which is how a Gemini client knows it has the
    whole of it, drains the socket (SocketTasks.LingeringClose) and
-   closes it, and logs one line on standard output:
+   closes it, and logs one line on standard output, beginning with the
+   time, UTC:
 
-     <client address> <status> <request> <client certificate | ->
-     <client address> failed: <why>
+     <time> <client address> <status> <request> <client certificate | ->
+     <time> <client address> failed: <why>
 
    The request is written with its control characters as %XX, so a line
-   in the log is always one line. *)
+   in the log is always one line.
 
-IMPORT Out, Tasks, Sockets, SocketTasks, Tls, TlsTasks;
+   At most a server's limit of connections are served at once (SetLimit);
+   at the limit, the next waits in the kernel's queue until one ends.
+
+   SIGTERM or SIGINT stops it cleanly: it stops accepting, closes its
+   listeners, so that a new client is refused at once, and waits for the
+   connections in progress, which their deadline bounds, logging
+
+     <time> stopping on signal <n>, connections in progress: <k>
+     <time> stopped
+
+   A second signal ends it at once. *)
+
+IMPORT SYSTEM, Out, Tasks, Sockets, SocketTasks, Tls, TlsTasks;
 
 CONST
   MaxRequest* = 1024;  (* a request's URL at most, by the specification *)
   MaxMeta* = 1024;     (* a response header's meta at most, likewise *)
   DefaultDeadline* = 10000;  (* ms a connection has, at most *)
+  DefaultLimit* = 256;       (* connections at once, at most *)
 
   Tick = 200;          (* ms an accept waits before looking at stop *)
   Linger = 2000;       (* ms a closed connection is drained for *)
@@ -37,6 +51,10 @@ CONST
   NoBody = 102;        (* Write: no 2x header first *)
   NoHeader = 103;      (* a Responder returned without a header *)
   NotListening = 104;  (* Serve before Listen *)
+
+PROCEDURE ["C", "GemServer.-catch"] CCatch;
+PROCEDURE ["C", "GemServer.-caught"] CCaught(): SYSTEM.INT32;
+PROCEDURE ["C", "GemServer.-now"] CNow(VAR out: ARRAY OF CHAR; max: SYSTEM.INT64);
 
 TYPE
   (* One connection's request, and its response so far. *)
@@ -72,17 +90,25 @@ TYPE
     ctx: Tls.Context;
     respond: Responder;
     deadline: LONGINT;
+    limit, active: LONGINT;   (* connections at once: at most, now *)
+    ended: Tasks.Condition;   (* signalled as each connection ends *)
     listeners: ARRAY 2 OF Sockets.Socket;
     n: INTEGER;               (* listeners *)
     count, accepted: LONGINT; (* connections to serve (0: no end), so far *)
     stop: BOOLEAN;
-    handlers: Handler         (* every connection's task, to join at the end *)
+    handlers: Handler         (* the connections' tasks not yet seen done *)
   END;
 
 PROCEDURE Length(s: ARRAY OF CHAR): LONGINT;
   VAR n: LONGINT;
 BEGIN n := 0; WHILE (n < LEN(s)) & (s[n] # 0X) DO INC(n) END; RETURN n
 END Length;
+
+(* Starts a line of the log: the time, UTC, and a space. *)
+PROCEDURE OutTime;
+  VAR t: ARRAY 32 OF CHAR;
+BEGIN CNow(t, LEN(t)); Out.String(t); Out.Char(" ")
+END OutTime;
 
 (* Writes the response header, status and meta, "" for none. *)
 PROCEDURE (x: Exchange) Header*(status: INTEGER; meta: ARRAY OF CHAR): BOOLEAN;
@@ -160,7 +186,7 @@ BEGIN
   NEW(x); x.peer := h.peer; x.status := 0; x.failed := FALSE; x.certHash := NIL;
   x.notBefore := -1; x.notAfter := -1;
   IF ~s.ctx.AcceptSocket(h.s.fd, x.conn) THEN
-    Out.String(h.peer.host); Out.String(" failed: "); Out.String(s.ctx.error.text^); Out.Ln
+    OutTime; Out.String(h.peer.host); Out.String(" failed: "); Out.String(s.ctx.error.text^); Out.Ln
   ELSE
     x.conn.SetDeadline(s.deadline);
     ok := TlsTasks.Handshake(x.conn) & ReadRequest(x);
@@ -186,7 +212,7 @@ BEGIN
     END;
     (* One line, with no wait between its parts, so the lines of tasks
        never mix. *)
-    Out.String(h.peer.host); Out.Char(" ");
+    OutTime; Out.String(h.peer.host); Out.Char(" ");
     IF ok THEN
       Out.Int(x.status, 0); Out.Char(" ");
       IF x.request = "" THEN Out.Char("-") ELSE OutEscaped(x.request) END;
@@ -198,8 +224,30 @@ BEGIN
     END;
     Out.Ln
   END;
-  IF ~closed THEN Sockets.Close(h.s) END
+  IF ~closed THEN Sockets.Close(h.s) END;
+  DEC(s.active); Tasks.Broadcast(s.ended)
 END Run;
+
+(* Whether a signal has asked the server to stop; it reads what the
+   handler wrote every time. *)
+PROCEDURE Stopping(): BOOLEAN;
+BEGIN RETURN CCaught() # 0
+END Stopping;
+
+(* Drops from s.handlers those whose tasks are done, so that the list
+   holds only those running, however long the server runs. *)
+PROCEDURE Prune(s: Server);
+  VAR h, prev: Handler;
+BEGIN
+  prev := NIL; h := s.handlers;
+  WHILE h # NIL DO
+    IF Tasks.Done(h) THEN
+      IF prev = NIL THEN s.handlers := h.next ELSE prev.next := h.next END
+    ELSE prev := h
+    END;
+    h := h.next
+  END
+END Prune;
 
 (* Accepts connections on l, starting a Handler for each, until stop. *)
 PROCEDURE (a: Acceptor) Run*;
@@ -207,16 +255,21 @@ PROCEDURE (a: Acceptor) Run*;
 BEGIN
   s := a.server;
   WHILE ~s.stop DO
+    (* at the limit, until a connection ends *)
+    WHILE s.active >= s.limit DO Tasks.Wait(s.ended) END;
     NEW(h); h.server := s;
     Sockets.SetDeadline(a.l, Tick);
-    IF SocketTasks.Accept(a.l, h.s, h.peer, err) THEN
-      h.next := s.handlers; s.handlers := h; Tasks.Start(h, TlsTasks.stackSize);
+    IF Stopping() THEN s.stop := TRUE
+    ELSIF SocketTasks.Accept(a.l, h.s, h.peer, err) THEN
+      Prune(s);
+      h.next := s.handlers; s.handlers := h; INC(s.active);
+      Tasks.Start(h, TlsTasks.stackSize);
       INC(s.accepted);
       IF s.accepted = s.count THEN s.stop := TRUE END
     ELSIF err.kind # Sockets.timedOut THEN
       (* EMFILE, or a connection reset while queued: report it, back
          off, go on *)
-      Out.String("accept failed: "); Out.String(err.text); Out.Ln; Tasks.Sleep(10)
+      OutTime; Out.String("accept failed: "); Out.String(err.text); Out.Ln; Tasks.Sleep(10)
     END
   END;
   Sockets.Close(a.l)
@@ -228,6 +281,7 @@ PROCEDURE New*(ctx: Tls.Context; respond: Responder): Server;
 BEGIN
   NEW(s); s.ctx := ctx; s.respond := respond; s.deadline := DefaultDeadline;
   s.n := 0; s.port := 0; s.count := 0; s.accepted := 0; s.stop := FALSE;
+  s.limit := DefaultLimit; s.active := 0;
   s.handlers := NIL;
   RETURN s
 END New;
@@ -236,6 +290,11 @@ END New;
 PROCEDURE (s: Server) SetDeadline*(ms: LONGINT);
 BEGIN s.deadline := ms
 END SetDeadline;
+
+(* The most connections served at once, at least 1. *)
+PROCEDURE (s: Server) SetLimit*(n: LONGINT);
+BEGIN IF n < 1 THEN s.limit := 1 ELSE s.limit := n END
+END SetLimit;
 
 (* Listens on port at host, "" for every local address (IPv6 and IPv4
    alike), port 0 for one the kernel chooses: s.port says which. *)
@@ -252,22 +311,29 @@ BEGIN
   RETURN TRUE
 END Listen;
 
-(* Serves count connections (0: until the program ends), then waits for
-   them to end and closes the listeners. Call it from the program's main
-   body: it runs every task. *)
+(* Serves count connections (0: until a signal stops it), then waits for
+   them to end, having closed the listeners. Call it from the program's
+   main body: it runs every task. It catches SIGTERM and SIGINT. *)
 PROCEDURE (s: Server) Serve*(count: LONGINT);
-  VAR as: ARRAY 2 OF Acceptor; i: INTEGER;
+  VAR as: ARRAY 2 OF Acceptor; i: INTEGER; stopping: BOOLEAN;
 BEGIN
   ASSERT(s.n > 0, NotListening);
   s.count := count;
   (* A client that goes away makes a write fail, not end the program. *)
   Sockets.IgnoreBrokenPipe;
+  CCatch;
   FOR i := 0 TO s.n - 1 DO
     NEW(as[i]); as[i].server := s; as[i].l := s.listeners[i];
     Tasks.Start(as[i], TlsTasks.stackSize)
   END;
   FOR i := 0 TO s.n - 1 DO Tasks.Join(as[i]) END;
+  stopping := Stopping();
+  IF stopping THEN
+    OutTime; Out.String("stopping on signal "); Out.Int(CCaught(), 0);
+    Out.String(", connections in progress: "); Out.Int(s.active, 0); Out.Ln
+  END;
   WHILE s.handlers # NIL DO Tasks.Join(s.handlers); s.handlers := s.handlers.next END;
+  IF stopping THEN OutTime; Out.String("stopped"); Out.Ln END;
   s.n := 0
 END Serve;
 

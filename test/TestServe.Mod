@@ -67,13 +67,15 @@ BEGIN
   RETURN n
 END Occurs;
 
-(* How many lines of log are line. *)
+(* How many lines of log are line, after the time that begins each
+   (TestRun checks it). *)
 PROCEDURE Lines(log, line: ARRAY OF CHAR): INTEGER;
   VAR l: ARRAY 1300 OF CHAR; i, j: LONGINT; n: INTEGER;
 BEGIN
   n := 0; i := 0;
   WHILE (i < LEN(log)) & (log[i] # 0X) DO
     j := 0;
+    IF (i + 21 < LEN(log)) & (log[i + 19] = "Z") & (log[i + 20] = " ") THEN INC(i, 21) END;
     WHILE (i < LEN(log)) & (log[i] # 0X) & (log[i] # LF) DO
       IF j < LEN(l) - 1 THEN l[j] := log[i]; INC(j) END;
       INC(i)

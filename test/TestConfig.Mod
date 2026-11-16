@@ -59,10 +59,11 @@ BEGIN
     Check.Check(FALSE, "make ../build/test-config"); Check.Summary; RETURN
   END;
 
-  Write("good", "# every setting|listen ::1|  port 1966  |deadline	2500|certdir /var/lib/po gemini   # a comment|| # and another|capsule Example.ORG|  alias WWW.example.org|  alias example.net|  root /srv/a#b c |  cert /etc/a.crt|  key /etc/a.key|require /private/|  identity SHA256:0123456789ABCDEF0123456789abcdef0123456789abcdef0123456789abcdef|  identity sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff|require /a b|capsule 127.0.0.1|  require /|capsule ::1");
+  Write("good", "# every setting|listen ::1|  port 1966  |deadline	2500|connections 100|user gemini|certdir /var/lib/po gemini   # a comment|| # and another|capsule Example.ORG|  alias WWW.example.org|  alias example.net|  root /srv/a#b c |  cert /etc/a.crt|  key /etc/a.key|require /private/|  identity SHA256:0123456789ABCDEF0123456789abcdef0123456789abcdef0123456789abcdef|  identity sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff|require /a b|capsule 127.0.0.1|  require /|capsule ::1");
   Check.Check(Read("good"), "a file with every setting");
   IF error # "" THEN Out.String("  error: "); Out.String(error); Out.Ln END;
   Check.Check((c.listen = "::1") & (c.port = 1966) & (c.deadline = 2500), "  ... listen, port and deadline");
+  Check.Check((c.connections = 100) & (c.user = "gemini"), "  ... connections and user");
   Check.Check(c.certdir = "/var/lib/po gemini", "  ... certdir, with a space, and the comment after it dropped");
   Check.Check(c.n = 3, "  ... three capsules");
   k := c.capsules[0];
@@ -94,7 +95,8 @@ BEGIN
     "  ... which has no aliases");
 
   Write("empty", "");
-  Check.Check(Read("empty") & (c.n = 0) & (c.port = -1) & (c.deadline = -1) & (c.listen = ""),
+  Check.Check(Read("empty") & (c.n = 0) & (c.port = -1) & (c.deadline = -1) & (c.listen = "")
+    & (c.connections = -1) & (c.user = ""),
     "an empty file: nothing set");
   Write("crlf", "port 1~|capsule a.example~|");
   Check.Check(Read("crlf") & (c.port = 1) & (c.n = 1) & (c.capsules[0].name = "a.example"),
@@ -103,6 +105,11 @@ BEGIN
   Bad("a port too large", "port 70000", "../build/test-config/bad:1: a port is 0 to 65535");
   Bad("a port not a number", "port 19x", "../build/test-config/bad:1: a port is 0 to 65535");
   Bad("a deadline of 0", "deadline 0", "../build/test-config/bad:1: a deadline is 1 to 3600000 ms");
+  Bad("connections 0", "connections 0", "../build/test-config/bad:1: connections is 1 to 100000");
+  Bad("connections too many", "connections 100001", "../build/test-config/bad:1: connections is 1 to 100000");
+  Bad("a user of two words", "user a b", "../build/test-config/bad:1: user takes one word");
+  Bad("user inside a capsule", "capsule a.example|user gemini",
+    "../build/test-config/bad:2: user inside a capsule: global settings come first");
   Bad("an unknown setting", "#|frobnicate 1", "../build/test-config/bad:2: unknown setting: frobnicate");
   Bad("no value", "capsule", "../build/test-config/bad:1: capsule needs a value");
   Bad("no value, only a comment", "port # 1965", "../build/test-config/bad:1: port needs a value");

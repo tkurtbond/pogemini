@@ -1,7 +1,8 @@
 MODULE pogemini; (* A Gemini server *)
 
 (* Usage: pogemini [-config file] [-listen host] [-port port]
-                   [-deadline ms] [-certdir dir] [-n count]
+                   [-deadline ms] [-connections n] [-user name]
+                   [-certdir dir] [-n count]
                    [-host name]... [-root dir] [-cert file -key file]
                    [-require path]...
 
@@ -24,10 +25,19 @@ MODULE pogemini; (* A Gemini server *)
    "port <n>", the port it listens on, so a program that starts it on
    port 0 learns which the kernel chose; then a line per connection
    (GemServer). Each connection has ms (default 10000) for the whole
-   exchange. With count, it serves that many connections, waits for
-   them to end, and exits 0, for the tests; without, it serves until
-   killed. A mistake in the configuration is reported on standard error
-   and it exits 1; a mistake in the options, 2.
+   exchange, and n connections (default 256) are served at once at
+   most. With count, it serves that many connections, waits for them to
+   end, and exits 0, for the tests; without, it serves until SIGTERM or
+   SIGINT, then waits likewise and exits 0. A mistake in the
+   configuration is reported on standard error and it exits 1; a
+   mistake in the options, 2.
+
+   Started as root, it becomes user (-user, or user in the file) once
+   it has its key pairs and listens, so that it serves files as user;
+   without one it refuses to run, since a server reading files as root
+   is one mistake from serving any of them. -user root keeps root, for
+   whoever really wants it. Not started as root, user may only name
+   the user it is.
 
    A request is checked by GemRequest, and answered by the capsule its
    host names (by name or alias), or else by the one for any host. One
@@ -40,7 +50,7 @@ MODULE pogemini; (* A Gemini server *)
    without answers "/" with a page naming it, and anything else 51. *)
 
 IMPORT Platform, Out, Err, Args, Strings, Directories, Sockets, Tls,
-  GemServer, GemRequest, GemConfig, GemCert, GemFiles, GemAccess;
+  GemServer, GemUser, GemRequest, GemConfig, GemCert, GemFiles, GemAccess;
 
 VAR
   config: GemConfig.Config;
@@ -49,7 +59,8 @@ VAR
 
 PROCEDURE Usage;
 BEGIN
-  Err.String("usage: pogemini [-config file] [-listen host] [-port port] [-deadline ms] [-certdir dir] [-n count]"); Err.Ln;
+  Err.String("usage: pogemini [-config file] [-listen host] [-port port] [-deadline ms]"); Err.Ln;
+  Err.String("                [-connections n] [-user name] [-certdir dir] [-n count]"); Err.Ln;
   Err.String("                [-host name]... [-root dir] [-cert file -key file] [-require path]..."); Err.Ln;
   Platform.Exit(2)
 END Usage;
@@ -181,6 +192,10 @@ BEGIN
       IF ~GemConfig.Number(value, 0, 65535, x) THEN Usage END; config.port := x
     ELSIF arg = "-deadline" THEN
       IF ~GemConfig.Number(value, 1, 3600000, x) THEN Usage END; config.deadline := x
+    ELSIF arg = "-connections" THEN
+      IF ~GemConfig.Number(value, 1, GemConfig.MaxConnections, x) THEN Usage END; config.connections := x
+    ELSIF arg = "-user" THEN
+      IF Strings.Length(value) >= GemConfig.NameLen THEN Usage END; COPY(value, config.user)
     ELSIF arg = "-n" THEN
       IF ~GemConfig.Number(value, 0, 1000000000, count) THEN Usage END
     ELSIF arg = "-certdir" THEN COPY(value, certdir)
@@ -208,12 +223,17 @@ BEGIN
   IF config.n = 0 THEN Usage END;
   IF config.port < 0 THEN config.port := GemConfig.DefaultPort END;
   IF config.deadline < 0 THEN config.deadline := GemConfig.DefaultDeadline END;
+  IF config.connections < 0 THEN config.connections := GemServer.DefaultLimit END;
+  IF (config.user = "") & GemUser.Root() THEN
+    Fail("", "started as root: give -user, a user to serve files as (-user root to stay root)")
+  END;
   IF (certdir = "") & ~GemCert.DefaultDir(certdir) THEN certdir := "" END;
 
   Prepare(certdir);
   s := GemServer.New(Context(), Respond);
-  s.SetDeadline(config.deadline);
+  s.SetDeadline(config.deadline); s.SetLimit(config.connections);
   IF ~s.Listen(config.listen, SHORT(config.port), err) THEN Fail("listen", err.text) END;
+  IF (config.user # "") & ~GemUser.Become(config.user, why) THEN Fail(config.user, why) END;
   port := s.port;
   Out.String("port "); Out.Int(s.port, 0); Out.Ln;
   s.Serve(count)

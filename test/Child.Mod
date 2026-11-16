@@ -15,6 +15,7 @@ PROCEDURE ["C", "Child.-wait"] CWait(pid: SYSTEM.INT32; out: SYSTEM.INT64;
 PROCEDURE ["C", "Child.-readline"] CReadLine(out: SYSTEM.INT64;
   VAR line: ARRAY OF CHAR; max: SYSTEM.INT64; ms: SYSTEM.INT32): SYSTEM.INT32;
 PROCEDURE ["C", "Child.-kill"] CKill(pid: SYSTEM.INT32);
+PROCEDURE ["C", "Child.-interrupt"] CInterrupt(pid: SYSTEM.INT32);
 
 TYPE
   Child* = RECORD pid: SYSTEM.INT32; out: SYSTEM.INT64 END;
@@ -49,10 +50,15 @@ PROCEDURE ReadLine*(VAR c: Child; VAR line: ARRAY OF CHAR; ms: LONGINT): BOOLEAN
 BEGIN RETURN CReadLine(c.out, line, LEN(line), SHORT(ms)) >= 0
 END ReadLine;
 
-(* Ends c, as for a server that won't finish by itself; Wait for it
-   afterwards. *)
+(* Ends c, as for a server that won't finish by itself, by SIGTERM;
+   Wait for it afterwards. *)
 PROCEDURE Kill*(VAR c: Child);
 BEGIN CKill(c.pid)
 END Kill;
+
+(* Sends c SIGINT, as Control-C would. *)
+PROCEDURE Interrupt*(VAR c: Child);
+BEGIN CInterrupt(c.pid)
+END Interrupt;
 
 END Child.

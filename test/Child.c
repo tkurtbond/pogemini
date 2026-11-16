@@ -22,6 +22,7 @@ int32_t child_wait(int32_t pid, int64_t out, char *got, int64_t gotmax,
 int32_t child_readline(int64_t out, char *line, int64_t max,
     int32_t ms) NAME("readline");
 void child_kill(int32_t pid) NAME("kill");
+void child_interrupt(int32_t pid) NAME("interrupt");
 
 /* Runs command with /bin/sh -c, its standard input
    a pipe given input and then closed, its standard output and error one
@@ -114,4 +115,10 @@ int32_t child_readline(int64_t out, char *line, int64_t max, int32_t ms)
 void child_kill(int32_t pid)
 {
 	kill(pid, SIGTERM);
+}
+
+/* Sends the child SIGINT, as Control-C would. */
+void child_interrupt(int32_t pid)
+{
+	kill(pid, SIGINT);
 }

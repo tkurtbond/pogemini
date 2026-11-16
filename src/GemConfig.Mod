@@ -8,6 +8,8 @@ MODULE GemConfig; (* The configuration: a file of our own, and capsules *)
      listen ::1              the address to listen on (default: every one)
      port 1965               the port
      deadline 10000          ms a connection has for the whole exchange
+     connections 256         connections served at once, at most
+     user gemini             the user to serve as, if started as root
      certdir /var/lib/pogemini/certs   where made certificates are kept
 
      capsule example.org     a capsule, by its host name; what follows
@@ -43,6 +45,7 @@ CONST
   NameLen* = 256;
   PathLen* = 1024;
   ErrorLen* = 1400;
+  MaxConnections* = 100000;
   DefaultPort* = 1965;
   DefaultDeadline* = 10000;
   MaxAreas* = 32;      (* requires in a capsule *)
@@ -79,6 +82,8 @@ TYPE
     port*: LONGINT;           (* -1 when not given *)
     deadline*: LONGINT;       (* -1 when not given *)
     certdir*: Path;           (* "" when not given *)
+    connections*: LONGINT;    (* -1 when not given *)
+    user*: Name;              (* "" when not given *)
     capsules*: ARRAY MaxCapsules OF Capsule;
     n*: INTEGER
   END;
@@ -87,6 +92,7 @@ PROCEDURE New*(): Config;
   VAR c: Config;
 BEGIN
   NEW(c); c.listen := ""; c.port := -1; c.deadline := -1; c.certdir := ""; c.n := 0;
+  c.connections := -1; c.user := "";
   RETURN c
 END New;
 
@@ -336,7 +342,7 @@ PROCEDURE Setting(c: Config; VAR k: Capsule; VAR a: Area; key, value: ARRAY OF C
 BEGIN
   IF value = "" THEN COPY(key, why); Strings.Append(" needs a value", why); RETURN FALSE END;
   IF (key = "capsule") OR (key = "alias") OR (key = "listen") OR (key = "port")
-    OR (key = "deadline") OR (key = "identity") THEN
+    OR (key = "deadline") OR (key = "identity") OR (key = "connections") OR (key = "user") THEN
     IF ~OneWord(value) THEN COPY(key, why); Strings.Append(" takes one word", why); RETURN FALSE END
   END;
   IF key = "capsule" THEN a := NIL; RETURN c.Add(value, FALSE, k, why)
@@ -364,6 +370,12 @@ BEGIN
   ELSIF key = "deadline" THEN
     IF ~Number(value, 1, 3600000, x) THEN COPY("a deadline is 1 to 3600000 ms", why); RETURN FALSE END;
     c.deadline := x
+  ELSIF key = "connections" THEN
+    IF ~Number(value, 1, MaxConnections, x) THEN COPY("connections is 1 to 100000", why); RETURN FALSE END;
+    c.connections := x
+  ELSIF key = "user" THEN
+    IF Strings.Length(value) >= NameLen THEN COPY("a user name too long", why); RETURN FALSE END;
+    COPY(value, c.user)
   ELSIF key = "certdir" THEN
     IF Strings.Length(value) >= PathLen THEN COPY("a file name too long", why); RETURN FALSE END;
     COPY(value, c.certdir)

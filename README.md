@@ -18,7 +18,11 @@ capsule asked for: the MIME type by extension (`text/gemini` for
 `.gmi`), a directory's `index.gmi`, never a hidden name (`.git`) or
 anything outside the root, even by a symbolic link. Parts of a capsule
 can require a client certificate, any or only those listed (status 60,
-61, and 62 for one outside its dates). Capsules come from
+61, and 62 for one outside its dates). It logs a line per connection,
+with the time, on standard output; stops cleanly on SIGTERM, finishing
+the connections in progress; serves at most `connections` at once; and,
+started as root, serves as `-user`. `contrib/pogemini.service` runs it
+under systemd. Capsules come from
 a configuration file, or one from the command line:
 
     build/pogemini -host example.org -root /srv/gemini [-cert server.crt -key server.key] [-port 1965]
@@ -31,6 +35,8 @@ A capsule given no certificate gets a self-signed one, made by
     # global settings first
     port 1965
     certdir /var/lib/pogemini/certs
+    connections 256         # at once, at most
+    user gemini             # to serve as, if started as root
 
     capsule example.org
       alias www.example.org
