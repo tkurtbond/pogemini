@@ -1,0 +1,40 @@
+#!/bin/ksh
+#
+# pogemini -- starts pogemini(1), a Gemini server, on OpenBSD.
+#
+# Install as /etc/rc.d/pogemini, mode 555, and enable it:
+#
+#   rcctl enable pogemini
+#
+# It reads /etc/pogemini.conf. Flags set by "rcctl set pogemini flags"
+# replace the ones below, so keep -config in them. Its log, a line per
+# connection, goes to syslog as daemon.info (/var/log/daemon, by the
+# default syslog.conf); "rcctl set pogemini logger" changes that.
+# logger splits a line longer than about 1000 bytes, as a long request
+# makes, in two.
+#
+# pogemini is started as root, so that it can read keys only root can
+# read and listen on port 1965, then serves as the configuration's user
+# (or -user), which must exist, for instance:
+#
+#   useradd -d /var/empty -s /sbin/nologin -c "Gemini server" _gemini
+#
+# Give the configuration a certdir (e.g. /var/pogemini/certs) if it
+# makes self-signed certificates, or they go in root's home. A mistake
+# in the configuration is logged too, and pogemini exits.
+#
+# Stopping sends it SIGTERM: it refuses new clients at once, lets the
+# connections in progress finish within their deadline, and exits.
+# There is no reload: restart it to read the configuration again.
+
+daemon="/usr/local/bin/pogemini"
+daemon_flags="-config /etc/pogemini.conf"
+daemon_logger="daemon.info"
+
+. /etc/rc.d/rc.subr
+
+# pogemini doesn't detach, so rc.subr runs it in the background.
+rc_bg=YES
+rc_reload=NO
+
+rc_cmd $1

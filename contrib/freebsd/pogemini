@@ -1,0 +1,64 @@
+#!/bin/sh
+#
+# pogemini -- starts pogemini(1), a Gemini server, on FreeBSD.
+#
+# Install as /usr/local/etc/rc.d/pogemini, mode 555, and enable it:
+#
+#   sysrc pogemini_enable=YES
+#
+# These may be set in rc.conf (by sysrc) if the defaults don't suit:
+#
+#   pogemini_config    the configuration file: /usr/local/etc/pogemini.conf
+#   pogemini_args      more options for pogemini, e.g. "-user gemini";
+#                      not pogemini_flags, which rc.subr gives daemon(8)
+#   pogemini_bin       the program: /usr/local/bin/pogemini
+#   pogemini_log       its log: /var/log/pogemini.log
+#
+# pogemini is started as root, so that it can read keys only root can
+# read and listen on port 1965, then serves as the configuration's user
+# (or -user), which must exist, for instance:
+#
+#   pw useradd gemini -d /nonexistent -s /usr/sbin/nologin -c "Gemini server"
+#
+# Give the configuration a certdir (e.g. /var/db/pogemini/certs) if it
+# makes self-signed certificates, or they go in root's home.
+#
+# daemon(8) runs it in the background, writes its process ID to
+# /var/run/pogemini.pid and its own to /var/run/pogemini.daemon.pid, and
+# appends its output, a line per connection, to the log. A mistake in
+# the configuration is logged there too, and pogemini exits. The log is
+# a file, not syslog, since daemon(8) passes syslog each read of the
+# output, which may hold several lines or part of one. daemon(8) reopens
+# it on SIGHUP, so newsyslog can rotate it; in /etc/newsyslog.conf.d/pogemini:
+#
+#   /var/log/pogemini.log  644  7  *  @T00  JC  /var/run/pogemini.daemon.pid
+#
+# Stopping sends it SIGTERM: it refuses new clients at once, lets the
+# connections in progress finish within their deadline, and exits.
+# There is no reload: restart it to read the configuration again.
+
+# PROVIDE: pogemini
+# REQUIRE: LOGIN NETWORKING
+# KEYWORD: shutdown
+
+. /etc/rc.subr
+
+name=pogemini
+rcvar=pogemini_enable
+desc="Gemini server"
+
+load_rc_config $name
+
+: ${pogemini_enable:=NO}
+: ${pogemini_config:=/usr/local/etc/pogemini.conf}
+: ${pogemini_args:=}
+: ${pogemini_bin:=/usr/local/bin/pogemini}
+: ${pogemini_log:=/var/log/pogemini.log}
+
+pidfile=/var/run/${name}.pid
+procname=${pogemini_bin}
+command=/usr/sbin/daemon
+command_args="-f -H -o ${pogemini_log} -p ${pidfile} -P /var/run/${name}.daemon.pid ${procname} -config ${pogemini_config} ${pogemini_args}"
+required_files=${pogemini_config}
+
+run_rc_command "$1"

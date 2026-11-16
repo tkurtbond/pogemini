@@ -545,7 +545,8 @@ Done 2026-11-16:
   - `MANDIR` is `$(PREFIX)/man` on NetBSD and OpenBSD, whose `man`
     looks there (NetBSD's default path is `/usr/{share,X11R7,pkg,local}/man`),
     and `$(PREFIX)/share/man` on Linux and FreeBSD;
-  - no rc script for the BSDs yet; README says how to start it from rc.
+  - no rc script for the BSDs yet; README says how to start it from rc
+    (since added: "rc scripts for the BSDs", below).
 - Checked: on Linux, `make clean && make test` (299 ok), install into a
   temporary prefix, `man -l` the page, the README's first capsule from
   the installed program (status 20, the certificate made once), and
@@ -557,6 +558,51 @@ Done 2026-11-16:
   the page regardless. The program links libtls (with OpenSSL or
   LibreSSL under it) and the C library, nothing
   of poc's.
+
+### rc scripts for the BSDs [done]
+
+Asked for after Phase 8. Done 2026-11-16: `contrib/freebsd/pogemini`,
+`contrib/netbsd/pogemini` and `contrib/openbsd/pogemini`, one per
+system, since their rc frameworks differ; `make install` puts the one
+for the system it runs on (by `uname -s`) in `$(DOCDIR)/rc.d`, mode
+555, and none on Linux. Decisions and findings:
+
+- All three start pogemini as root, so it reads root's keys and binds
+  1965, and it becomes the configuration's `user`; stopping is SIGTERM,
+  and there is no reload, since pogemini doesn't catch SIGHUP. The
+  configuration is `/usr/local/etc/pogemini.conf` on FreeBSD and
+  NetBSD, `/etc/pogemini.conf` on OpenBSD, as each system's own
+  daemons do.
+- **FreeBSD**: daemon(8) `-f -H -o /var/log/pogemini.log -p
+  /var/run/pogemini.pid -P /var/run/pogemini.daemon.pid`. Two
+  rc.subr pitfalls: `${name}_flags` goes before `command_args`, so to
+  daemon(8), and options for pogemini are `pogemini_args`; and
+  `${name}_program` silently replaces `command`, so the program's path
+  is `pogemini_bin` (named `pogemini_program` at first, it ran
+  pogemini with daemon(8)'s options). The log is a file, not syslog:
+  with `-S`, daemon(8) hands syslog each read of the output, so two
+  lines written together ("stopping on signal 15" and "stopped")
+  became one record. `-H` reopens the file on SIGHUP to daemon(8),
+  so newsyslog rotates it by `/var/run/pogemini.daemon.pid` (checked:
+  moved, HUPed, the next line in the new file).
+- **NetBSD**: no daemon(8). rc.subr evaluates the command line, so
+  `command_args` ends `2>&1 | logger -t pogemini -p daemon.info &`;
+  no pidfile, rc.subr finds the process by its path; logger exits when
+  pogemini does.
+- **OpenBSD**: `rc_bg=YES` and `daemon_logger=daemon.info`;
+  `rc_reload=NO`. Flags from `rcctl set` replace `daemon_flags`
+  whole, so the comment says to keep `-config`.
+- On NetBSD and OpenBSD, logger splits a line over about 1000 bytes in
+  two (a 1024-byte request: 1055 and 70 bytes on NetBSD, 1063 and 77 on
+  OpenBSD); documented, not avoided.
+- A mistake in the configuration is logged, and pogemini exits; rc
+  reports it on OpenBSD only (`pogemini(failed)`), since FreeBSD's and
+  NetBSD's start return before pogemini reads its file.
+- Checked as root on alerik (FreeBSD 15.1), artos (NetBSD 11.0) and
+  jherek (OpenBSD 7.9), amd64: start, status, a second start refused,
+  a fetch (20) and a 1024-byte request (51) logged, stop with the
+  pidfiles gone, and a bad configuration; and `gmake install` and
+  `uninstall` with each script. Not run on the i386 hosts.
 
 ## Open questions
 

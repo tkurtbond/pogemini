@@ -38,7 +38,9 @@ documentation and install: README.md (the user's guide),
 `doc/pogemini.1` (the manual page, mdoc), `contrib/pogemini.conf` (an
 example configuration, which `TestConfig` reads), and `make install`,
 checked on Linux and all five BSD hosts. Every phase of PLAN.md's
-roadmap is done.
+roadmap is done. Since then, rc scripts for the BSDs,
+`contrib/{freebsd,netbsd,openbsd}/pogemini`, checked as root on the
+amd64 hosts (PLAN.md, "rc scripts for the BSDs").
 
 **poc 0.13.0 or later, and polibtls and posockets built by the same
 poc.** A poc library works only with the poc that built it. Both were

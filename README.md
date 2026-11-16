@@ -130,9 +130,15 @@ s by default), and it exits 0. A second signal ends it at once.
 On Linux with systemd, `contrib/pogemini.service` starts it as the user
 `gemini`, logs to the journal, keeps self-signed certificates in
 `/var/lib/pogemini`, and sandboxes it; its comments say how to install
-it. On the BSDs, start it from the system's rc as root, with `-user`
-(or `user` in the file) and its output redirected to a log file; no rc
-script is supplied yet.
+it. On the BSDs, `contrib/freebsd/pogemini`, `contrib/netbsd/pogemini`
+and `contrib/openbsd/pogemini` are rc scripts, and `make install`
+puts the one for the system it runs on in `share/doc/pogemini/rc.d`.
+Each starts it as root, so the configuration must name a `user`, and
+its comments say how to install and enable it. On FreeBSD its log goes
+to `/var/log/pogemini.log`, through daemon(8), which reopens the file
+for newsyslog; on NetBSD and OpenBSD to syslog, as `daemon.info`
+(`/var/log/messages` and `/var/log/daemon`), where a line over about
+1000 bytes is split in two.
 
 ## License
 

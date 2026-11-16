@@ -1,0 +1,56 @@
+#!/bin/sh
+#
+# pogemini -- starts pogemini(1), a Gemini server, on NetBSD.
+#
+# Install as /etc/rc.d/pogemini, mode 555, and enable it in /etc/rc.conf:
+#
+#   pogemini=YES
+#
+# These may be set there too if the defaults don't suit:
+#
+#   pogemini_config    the configuration file: /usr/local/etc/pogemini.conf
+#   pogemini_flags     more options for pogemini, e.g. "-user gemini"
+#   pogemini_bin       the program: /usr/local/bin/pogemini
+#   pogemini_syslog    the syslog facility.priority for its log: daemon.info
+#
+# pogemini is started as root, so that it can read keys only root can
+# read and listen on port 1965, then serves as the configuration's user
+# (or -user), which must exist, for instance:
+#
+#   useradd -d /nonexistent -s /sbin/nologin -c "Gemini server" gemini
+#
+# Give the configuration a certdir (e.g. /var/db/pogemini/certs) if it
+# makes self-signed certificates, or they go in root's home.
+#
+# It runs in the background, its output, a line per connection, piped
+# to logger(1), so to syslog (/var/log/messages, by the default
+# syslog.conf). A mistake in the configuration is logged there too, and
+# pogemini exits. logger splits a line longer than about 1000 bytes, as
+# a long request makes, in two.
+#
+# Stopping sends it SIGTERM: it refuses new clients at once, lets the
+# connections in progress finish within their deadline, and exits.
+# There is no reload: restart it to read the configuration again.
+
+# PROVIDE: pogemini
+# REQUIRE: DAEMON
+# KEYWORD: shutdown
+
+$_rc_subr_loaded . /etc/rc.subr
+
+name=pogemini
+rcvar=$name
+load_rc_config $name
+
+: ${pogemini_config:=/usr/local/etc/pogemini.conf}
+: ${pogemini_bin:=/usr/local/bin/pogemini}
+: ${pogemini_syslog:=daemon.info}
+
+# pogemini doesn't detach, so it is put in the background here; rc.subr
+# evaluates the command line, so the pipe and the & work. There is no
+# pidfile: rc.subr finds the process by the program's path.
+command=${pogemini_bin}
+command_args="-config ${pogemini_config} 2>&1 | logger -t ${name} -p ${pogemini_syslog} &"
+required_files=${pogemini_config}
+
+run_rc_command "$1"

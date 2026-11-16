@@ -8,7 +8,8 @@
 # and the programs, into $(BUILD), so make must not build two at once.
 #
 # make install puts the program, its manual page and its documentation
-# (README, the example configuration, the systemd unit) under $(PREFIX),
+# (README, the example configuration, the systemd unit, and on a BSD its
+# rc script, as rc.d/pogemini) under $(PREFIX),
 # ~/.local by default, or under $(DESTDIR)$(PREFIX) for a package.
 # POCLIBDIR doesn't follow PREFIX: it is where the libraries were
 # installed, not where this goes. Build first as yourself, then install
@@ -26,6 +27,8 @@ MANDIR ?= $(PREFIX)/man
 else
 MANDIR ?= $(PREFIX)/share/man
 endif
+# The rc script for this system, contrib/<system>/pogemini, if there is one.
+RCSCRIPT := $(wildcard contrib/$(shell uname -s | tr A-Z a-z)/pogemini)
 # The size model, the one polibtls and posockets are installed in.
 POCFLAGS := -OC
 
@@ -98,9 +101,17 @@ install:
 	install -m 755 $(BUILD)/pogemini $(DESTDIR)$(BINDIR)/pogemini
 	install -m 644 doc/pogemini.1 $(DESTDIR)$(MANDIR)/man1/pogemini.1
 	install -m 644 README.md LICENSE contrib/pogemini.conf contrib/pogemini.service $(DESTDIR)$(DOCDIR)
+ifneq ($(RCSCRIPT),)
+	install -d $(DESTDIR)$(DOCDIR)/rc.d
+	install -m 555 $(RCSCRIPT) $(DESTDIR)$(DOCDIR)/rc.d/pogemini
+endif
 
 uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/pogemini $(DESTDIR)$(MANDIR)/man1/pogemini.1
 	rm -f $(DESTDIR)$(DOCDIR)/README.md $(DESTDIR)$(DOCDIR)/LICENSE
 	rm -f $(DESTDIR)$(DOCDIR)/pogemini.conf $(DESTDIR)$(DOCDIR)/pogemini.service
+ifneq ($(RCSCRIPT),)
+	rm -f $(DESTDIR)$(DOCDIR)/rc.d/pogemini
+	-rmdir $(DESTDIR)$(DOCDIR)/rc.d
+endif
 	-rmdir $(DESTDIR)$(DOCDIR)
