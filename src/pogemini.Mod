@@ -3,10 +3,13 @@ MODULE pogemini; (* A Gemini server *)
 (* Usage: pogemini [-config file] [-listen host] [-port port]
                    [-deadline ms] [-certdir dir] [-n count]
                    [-host name]... [-root dir] [-cert file -key file]
+                   [-require path]...
 
    Serves the capsules in the configuration file (GemConfig gives its
    format), and one more given on the command line: its name is the
-   first -host, any others its aliases, with -root, -cert and -key, and
+   first -host, any others its aliases, with -root, -cert, -key and
+   -require (a path that needs a client certificate; identities, which
+   narrow which, are given only in the file), and
    it comes first, so it is the one a client that sends no SNI is shown.
    Without -host, that capsule serves any host, and needs -cert and
    -key. Options given here override the file's.
@@ -31,11 +34,13 @@ MODULE pogemini; (* A Gemini server *)
    that names none, or for a port other than the one listened on, is
    refused, 53: this server is no proxy.
 
-   A capsule with a root serves the files under it (GemFiles); one
+   A request for a path inside one of the capsule's requires is refused
+   without a client certificate fit for it (GemAccess). Otherwise, a
+   capsule with a root serves the files under it (GemFiles); one
    without answers "/" with a page naming it, and anything else 51. *)
 
 IMPORT Platform, Out, Err, Args, Strings, Directories, Sockets, Tls,
-  GemServer, GemRequest, GemConfig, GemCert, GemFiles;
+  GemServer, GemRequest, GemConfig, GemCert, GemFiles, GemAccess;
 
 VAR
   config: GemConfig.Config;
@@ -45,7 +50,7 @@ VAR
 PROCEDURE Usage;
 BEGIN
   Err.String("usage: pogemini [-config file] [-listen host] [-port port] [-deadline ms] [-certdir dir] [-n count]"); Err.Ln;
-  Err.String("                [-host name]... [-root dir] [-cert file -key file]"); Err.Ln;
+  Err.String("                [-host name]... [-root dir] [-cert file -key file] [-require path]..."); Err.Ln;
   Platform.Exit(2)
 END Usage;
 
@@ -77,7 +82,8 @@ BEGIN
     k := CapsuleFor(r);
     IF k = NIL THEN
       IF x.Header(GemRequest.Refused, "not served here") THEN END
-    ELSIF k.root # "" THEN GemFiles.Serve(x, k.root, r)
+    ELSIF ~GemAccess.Allowed(x, k, r.path) THEN  (* refused, with its header *)
+    ELSIF k.root # "" THEN GemFiles.Serve(x, k, r)
     ELSIF r.path # "/" THEN
       IF x.Header(51, "not found") THEN END
     ELSIF x.Header(20, "text/gemini") & x.WriteString("# pogemini") & x.WriteString(0AX)
@@ -147,8 +153,9 @@ PROCEDURE Main;
   VAR arg, value, file, cert, key, root, certdir: GemConfig.Path;
     why: ARRAY GemConfig.ErrorLen OF CHAR;
     hosts: ARRAY GemConfig.MaxAliases + 1 OF GemConfig.Name;
-    count, x: LONGINT; i, j, nHosts: INTEGER;
-    k: GemConfig.Capsule; s: GemServer.Server; err: Sockets.Error;
+    requires: ARRAY GemConfig.MaxAreas OF GemConfig.Path;
+    count, x: LONGINT; i, j, nHosts, nRequires: INTEGER;
+    k: GemConfig.Capsule; a: GemConfig.Area; s: GemServer.Server; err: Sockets.Error;
 BEGIN
   config := GemConfig.New();
   (* the file first, so the options can override it *)
@@ -161,7 +168,7 @@ BEGIN
   END;
   IF (file # "") & ~GemConfig.Read(config, file, why) THEN Fail("", why) END;
 
-  cert := ""; key := ""; root := ""; certdir := config.certdir; nHosts := 0; count := 0;
+  cert := ""; key := ""; root := ""; certdir := config.certdir; nHosts := 0; nRequires := 0; count := 0;
   i := 1;
   WHILE i < Args.argc DO
     Args.Get(i, arg); Args.Get(i + 1, value);
@@ -180,17 +187,23 @@ BEGIN
     ELSIF arg = "-root" THEN COPY(value, root)
     ELSIF arg = "-cert" THEN COPY(value, cert)
     ELSIF arg = "-key" THEN COPY(value, key)
+    ELSIF arg = "-require" THEN
+      IF nRequires = LEN(requires) THEN Usage END;
+      COPY(value, requires[nRequires]); INC(nRequires)
     ELSE Usage
     END;
     INC(i, 2)
   END;
-  IF (nHosts > 0) OR (cert # "") OR (key # "") OR (root # "") THEN
+  IF (nHosts > 0) OR (cert # "") OR (key # "") OR (root # "") OR (nRequires > 0) THEN
     IF nHosts = 0 THEN hosts[0] := "" END;
     IF ~config.Add(hosts[0], TRUE, k, why) THEN Fail("-host", why) END;
     FOR j := 1 TO nHosts - 1 DO
       IF ~config.AddAlias(k, hosts[j], why) THEN Fail("-host", why) END
     END;
-    k.cert := cert; k.key := key; k.root := root
+    k.cert := cert; k.key := key; k.root := root;
+    FOR j := 0 TO nRequires - 1 DO
+      IF ~GemConfig.AddArea(k, requires[j], a, why) THEN Fail("-require", why) END
+    END
   END;
   IF config.n = 0 THEN Usage END;
   IF config.port < 0 THEN config.port := GemConfig.DefaultPort END;

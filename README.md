@@ -16,7 +16,9 @@ alike; so far it is built only on Linux.
 specification forbids, and serves the files under the root of the
 capsule asked for: the MIME type by extension (`text/gemini` for
 `.gmi`), a directory's `index.gmi`, never a hidden name (`.git`) or
-anything outside the root, even by a symbolic link. Capsules come from
+anything outside the root, even by a symbolic link. Parts of a capsule
+can require a client certificate, any or only those listed (status 60,
+61, and 62 for one outside its dates). Capsules come from
 a configuration file, or one from the command line:
 
     build/pogemini -host example.org -root /srv/gemini [-cert server.crt -key server.key] [-port 1965]
@@ -35,6 +37,8 @@ A capsule given no certificate gets a self-signed one, made by
       root /srv/gemini/example.org
       cert /etc/pogemini/example.org.crt
       key /etc/pogemini/example.org.key
+      require /private        # a client certificate needed below here,
+        identity SHA256:3f0c...  # and only these (any, if none listed)
 
 [PLAN.md](PLAN.md) has the design and the roadmap, and
 [AGENTS.md](AGENTS.md) the working notes.

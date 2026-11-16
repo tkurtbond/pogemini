@@ -15,6 +15,18 @@ MODULE GemConfig; (* The configuration: a file of our own, and capsules *)
        root /srv/gemini/example.org    another name, its documents,
        cert /etc/pogemini/example.org.crt   and its certificate and key
        key /etc/pogemini/example.org.key    (made if neither is given)
+       require /private        a path that needs a client certificate,
+         identity SHA256:3f0c...   and those it accepts (any, if none)
+
+   A require is a path, decoded (a space as itself, not %20), beginning
+   with "/"; it covers itself and everything below it, segment by
+   segment: "/private" covers "/private" and "/private/a.gmi", not
+   "/privateer". "/" covers the whole capsule. A request inside it must
+   come with a client certificate (60 without), within its dates (62
+   outside them), and, if identity lines follow the require, one of
+   those (61 otherwise). An identity is a certificate's SHA-256 hash, as
+   the log shows it. Where requires nest, each one applies, so an inner
+   one can only narrow what an outer one lets through (GemAccess).
 
    A value is the rest of the line with its spaces trimmed, so a file
    name may contain spaces; a name or number must be one word. A host
@@ -33,18 +45,32 @@ CONST
   ErrorLen* = 1400;
   DefaultPort* = 1965;
   DefaultDeadline* = 10000;
+  MaxAreas* = 32;      (* requires in a capsule *)
+  MaxIdentities* = 64; (* identities in a require *)
+  HashLen* = 72;       (* "SHA256:", 64 hex digits, 0X *)
   LineLen = 1100;
 
 TYPE
   Name* = ARRAY NameLen OF CHAR;
   Path* = ARRAY PathLen OF CHAR;
+  Hash* = ARRAY HashLen OF CHAR;
+
+  (* A require: a path, and the certificates it accepts. *)
+  Area* = POINTER TO AreaDesc;
+  AreaDesc* = RECORD
+    path*: Path;              (* "/", or a path without a final "/" *)
+    ids*: ARRAY MaxIdentities OF Hash;  (* "SHA256:" and lower-case hex *)
+    nIds*: INTEGER            (* 0: any certificate *)
+  END;
 
   Capsule* = POINTER TO CapsuleDesc;
   CapsuleDesc* = RECORD
     name*: Name;              (* "" for one that serves any host *)
     aliases*: ARRAY MaxAliases OF Name;
     nAliases*: INTEGER;
-    root*, cert*, key*: Path  (* "" when not given *)
+    root*, cert*, key*: Path; (* "" when not given *)
+    areas*: ARRAY MaxAreas OF Area;
+    nAreas*: INTEGER
   END;
 
   Config* = POINTER TO ConfigDesc;
@@ -145,7 +171,7 @@ BEGIN
   IF c.n = MaxCapsules THEN COPY("too many capsules", why); RETURN FALSE END;
   IF (n # "") & ~ValidName(n) THEN COPY("not a host name: ", why); Strings.Append(name, why); RETURN FALSE END;
   IF c.Find(n) # NIL THEN COPY("a second capsule for ", why); Strings.Append(n, why); RETURN FALSE END;
-  NEW(k); k.name := n; k.nAliases := 0; k.root := ""; k.cert := ""; k.key := "";
+  NEW(k); k.name := n; k.nAliases := 0; k.root := ""; k.cert := ""; k.key := ""; k.nAreas := 0;
   IF first THEN
     FOR i := c.n TO 1 BY -1 DO c.capsules[i] := c.capsules[i - 1] END;
     c.capsules[0] := k
@@ -168,6 +194,76 @@ BEGIN
   k.aliases[k.nAliases] := n; INC(k.nAliases);
   RETURN TRUE
 END AddAlias;
+
+(* Whether path, a request's, normalised (GemRequest), is within area
+   path a: a itself, or below it. *)
+PROCEDURE Within*(path, a: ARRAY OF CHAR): BOOLEAN;
+  VAR i: LONGINT;
+BEGIN
+  IF a = "/" THEN RETURN TRUE END;
+  i := 0; WHILE (a[i] # 0X) & (path[i] = a[i]) DO INC(i) END;
+  RETURN (a[i] = 0X) & ((path[i] = 0X) OR (path[i] = "/"))
+END Within;
+
+(* Adds to k a require for path, normalised, as a: FALSE, with why, if
+   path isn't one a request could have (relative, with an empty, "."
+   or ".." segment, or a control character), or k has it already. *)
+PROCEDURE AddArea*(k: Capsule; path: ARRAY OF CHAR; VAR a: Area;
+    VAR why: ARRAY OF CHAR): BOOLEAN;
+  VAR p: Path; i, n: LONGINT;
+BEGIN
+  IF Strings.Length(path) >= PathLen THEN COPY("a require too long", why); RETURN FALSE END;
+  COPY(path, p); n := Strings.Length(p);
+  IF Strings.Pos("//", p, 0) >= 0 THEN
+    COPY("a require with an empty, . or .. segment: ", why); Strings.Append(path, why); RETURN FALSE
+  END;
+  IF (n > 1) & (p[n - 1] = "/") THEN DEC(n); p[n] := 0X END;
+  IF p[0] # "/" THEN COPY("a require is a path beginning with /", why); RETURN FALSE END;
+  i := 0;
+  WHILE i < n DO
+    IF (p[i] < " ") OR (p[i] = 7FX) THEN
+      COPY("a control character in a require", why); RETURN FALSE
+    ELSIF (p[i] = "/") & (n > 1) & ((p[i + 1] = "/") OR (p[i + 1] = 0X)
+      OR (p[i + 1] = ".") & ((p[i + 2] = "/") OR (p[i + 2] = 0X)
+        OR (p[i + 2] = ".") & ((p[i + 3] = "/") OR (p[i + 3] = 0X)))) THEN
+      COPY("a require with an empty, . or .. segment: ", why); Strings.Append(path, why); RETURN FALSE
+    END;
+    INC(i)
+  END;
+  FOR i := 0 TO k.nAreas - 1 DO
+    IF k.areas[i].path = p THEN COPY("a second require for ", why); Strings.Append(p, why); RETURN FALSE END
+  END;
+  IF k.nAreas = MaxAreas THEN COPY("too many requires", why); RETURN FALSE END;
+  NEW(a); a.path := p; a.nIds := 0;
+  k.areas[k.nAreas] := a; INC(k.nAreas);
+  RETURN TRUE
+END AddArea;
+
+(* Adds hash, "SHA256:" and 64 hex digits, in either case, to the
+   certificates a accepts, as libtls writes one: "SHA256:" and lower
+   case. *)
+PROCEDURE AddIdentity*(a: Area; hash: ARRAY OF CHAR; VAR why: ARRAY OF CHAR): BOOLEAN;
+  VAR h, prefix: Hash; i: LONGINT; ch: CHAR;
+BEGIN
+  prefix := "sha256:";
+  IF Strings.Length(hash) # HashLen - 1 THEN
+    COPY("an identity is SHA256: and 64 hex digits", why); RETURN FALSE
+  END;
+  COPY(hash, h); Lower(h);
+  i := 0; WHILE (i < 7) & (h[i] = prefix[i]) DO INC(i) END;
+  IF i < 7 THEN COPY("an identity is SHA256: and 64 hex digits", why); RETURN FALSE END;
+  WHILE i < HashLen - 1 DO
+    ch := h[i];
+    IF ~IsDigit(ch) & ~((ch >= "a") & (ch <= "f")) THEN
+      COPY("an identity is SHA256: and 64 hex digits", why); RETURN FALSE
+    END;
+    INC(i)
+  END;
+  h[0] := "S"; h[1] := "H"; h[2] := "A";
+  IF a.nIds = MaxIdentities THEN COPY("too many identities", why); RETURN FALSE END;
+  a.ids[a.nIds] := h; INC(a.nIds);
+  RETURN TRUE
+END AddIdentity;
 
 (* s as a number from lo to hi, or FALSE. *)
 PROCEDURE Number*(s: ARRAY OF CHAR; lo, hi: LONGINT; VAR x: LONGINT): BOOLEAN;
@@ -232,17 +328,24 @@ BEGIN
 END Error;
 
 (* One setting, key and value, into c; k is the capsule being read, NIL
-   before the first. FALSE with why if it is wrong. *)
-PROCEDURE Setting(c: Config; VAR k: Capsule; key, value: ARRAY OF CHAR;
+   before the first, and a its latest require, NIL before one. FALSE
+   with why if it is wrong. *)
+PROCEDURE Setting(c: Config; VAR k: Capsule; VAR a: Area; key, value: ARRAY OF CHAR;
     VAR why: ARRAY OF CHAR): BOOLEAN;
   VAR x: LONGINT;
 BEGIN
   IF value = "" THEN COPY(key, why); Strings.Append(" needs a value", why); RETURN FALSE END;
   IF (key = "capsule") OR (key = "alias") OR (key = "listen") OR (key = "port")
-    OR (key = "deadline") THEN
+    OR (key = "deadline") OR (key = "identity") THEN
     IF ~OneWord(value) THEN COPY(key, why); Strings.Append(" takes one word", why); RETURN FALSE END
   END;
-  IF key = "capsule" THEN RETURN c.Add(value, FALSE, k, why)
+  IF key = "capsule" THEN a := NIL; RETURN c.Add(value, FALSE, k, why)
+  ELSIF key = "require" THEN
+    IF k = NIL THEN COPY("require outside a capsule", why); RETURN FALSE END;
+    RETURN AddArea(k, value, a, why)
+  ELSIF key = "identity" THEN
+    IF a = NIL THEN COPY("identity outside a require", why); RETURN FALSE END;
+    RETURN AddIdentity(a, value, why)
   ELSIF (key = "alias") OR (key = "root") OR (key = "cert") OR (key = "key") THEN
     IF k = NIL THEN COPY(key, why); Strings.Append(" outside a capsule", why); RETURN FALSE
     ELSIF key = "alias" THEN RETURN c.AddAlias(k, value, why)
@@ -274,11 +377,11 @@ END Setting;
 PROCEDURE Read*(c: Config; file: ARRAY OF CHAR; VAR error: ARRAY OF CHAR): BOOLEAN;
   VAR f: Files.File; r: Files.Rider; line: ARRAY LineLen + 2 OF CHAR;
     key: ARRAY 64 OF CHAR; value: Path; why: ARRAY ErrorLen OF CHAR;
-    n: LONGINT; k: Capsule;
+    n: LONGINT; k: Capsule; a: Area;
 BEGIN
   f := Files.Old(file);
   IF f = NIL THEN COPY(file, error); Strings.Append(": can't be read", error); RETURN FALSE END;
-  Files.Set(r, f, 0); n := 0; k := NIL;
+  Files.Set(r, f, 0); n := 0; k := NIL; a := NIL;
   LOOP
     Files.ReadLine(r, line); INC(n);
     IF r.eof & (line = "") THEN EXIT END;
@@ -286,7 +389,7 @@ BEGIN
       Error(file, n, "a line too long", error); Files.Close(f); RETURN FALSE
     END;
     Split(line, key, value);
-    IF (key # "") & ~Setting(c, k, key, value, why) THEN
+    IF (key # "") & ~Setting(c, k, a, key, value, why) THEN
       Error(file, n, why, error); Files.Close(f); RETURN FALSE
     END;
     IF r.eof THEN EXIT END

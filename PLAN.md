@@ -368,10 +368,51 @@ can't read, unless run as root; and a capsule without a root). `TestServe`'s
 longest request is now answered 51, there being no such file, and
 `TestRequests`'s other clients ask for `/?<client>`.
 
-### Phase 5: client certificates
+### Phase 5: client certificates [done]
 
 Paths that require a client certificate (60), and what the server makes
 of an expired or unaccepted one (61, 62).
+
+Decisions (2026-11-16):
+
+- **A require is a path in a capsule** (`require /private` in the
+  file, `-require` on the command line), covering itself and everything
+  below it, segment by segment: `/private` covers `/private/a.gmi`, not
+  `/privateer`; `/` the whole capsule, its built-in page included. It is
+  written decoded, as GemRequest gives a request's path; one with an
+  empty, `.` or `..` segment, which no request has, is refused, and a
+  final `/` dropped.
+- **Identities** are `identity SHA256:<hex>` lines after a require,
+  narrowing it to those certificates (any if none), written as the log
+  shows a hash, the hex in either case. Only in the file: the command
+  line's `-require` takes any certificate, since a list of hashes
+  belongs in a file, not a process listing.
+- **The status**: 60 without a certificate; 62 for one outside its
+  dates, which the server checks itself (libtls checks nothing when
+  verification is off, polibtls's `PeerCertNotAfter`), and only inside
+  a require, since elsewhere a certificate is only logged; 61 for one
+  not among the require's identities. An expired certificate not listed
+  either is 62: its dates are checked first.
+- **Nested requires all apply**, so an inner one can only narrow an
+  outer one, never widen it (`/members` lists two, `/members/inner`
+  one of them).
+- **The request's path is checked before the file is looked up**, so a
+  file that isn't there, a directory without its `/` (no 31), anything,
+  gets 60 alike, and a client learns nothing of what is inside. **The
+  file's real path is checked too** (GemFiles, with the path
+  `gemfiles_open` resolved), so a symbolic link from outside a require
+  into it needs what the require needs. A hard link can't be told from
+  the file; whoever could make one could copy the file as well.
+- **Halt codes**: none new; a mistake in a require or identity is a
+  configuration error, reported with its line, exit 1.
+
+Tests: `TestConfig` (requires and identities read and normalised,
+`Within`, eleven ways to get one wrong), `TestCerts` (the server with a
+configuration file of three requires, one nested: 20, 60, 61 and 62 by
+GemClient with the tests' client certificates, EC and RSA, an expired
+one, none; a missing file and a directory without `/` inside; links into
+a require; the hashes, from `openssl x509 -fingerprint`, one given in
+capitals; the log; and `-require /` on a capsule without a root).
 
 ### Phase 6: running it
 

@@ -23,6 +23,11 @@ MODULE GemFiles; (* A capsule's files, served *)
    is refused, as if a file under the root that someone made a link
    could be used to read the rest of the system.
 
+   A file or directory inside a require (GemConfig) is served only as
+   GemAccess allows, judged by the path it really has, under the root:
+   the request's path was judged already (pogemini), and a link may
+   lead into a require from outside it.
+
    The root is resolved once (Resolve) and the file's path resolved and
    compared with it for each request; the file is then opened by its
    resolved path, without following a final link. A link swapped in
@@ -36,7 +41,7 @@ MODULE GemFiles; (* A capsule's files, served *)
    through, what was sent is all the client gets, ended as if complete:
    Gemini has no way to say otherwise. *)
 
-IMPORT SYSTEM, Strings, GemServer, GemRequest;
+IMPORT SYSTEM, Strings, GemServer, GemRequest, GemConfig, GemAccess;
 
 CONST
   Piece* = 16384;  (* bytes read and sent at a time *)
@@ -49,7 +54,7 @@ CONST
 PROCEDURE ["C", "GemFiles.-resolve"] CResolve(path: ARRAY OF CHAR;
   VAR out: ARRAY OF CHAR; max: SYSTEM.INT64): SYSTEM.INT32;
 PROCEDURE ["C", "GemFiles.-open"] COpen(root, path: ARRAY OF CHAR;
-  VAR kind: SYSTEM.INT32): SYSTEM.INT32;
+  VAR kind: SYSTEM.INT32; VAR real: ARRAY OF CHAR; max: SYSTEM.INT64): SYSTEM.INT32;
 PROCEDURE ["C", "GemFiles.-read"] CRead(fd: SYSTEM.INT32; VAR buf: ARRAY OF CHAR;
   pos, len: SYSTEM.INT64): SYSTEM.INT64;
 PROCEDURE ["C", "GemFiles.-close"] CClose(fd: SYSTEM.INT32);
@@ -140,17 +145,41 @@ BEGIN
   CClose(fd)
 END Send;
 
-(* Answers r, a request for a file under root, a path Resolve gave. *)
-PROCEDURE Serve*(x: GemServer.Exchange; root: ARRAY OF CHAR; VAR r: GemRequest.Request);
+(* Opens path, under root, as COpen, and, for a file or a directory,
+   checks that x may have it, by the path it really has: if not, x has
+   its header, and the result is -1 and kind Missing. *)
+PROCEDURE Open(x: GemServer.Exchange; k: GemConfig.Capsule; path: ARRAY OF CHAR;
+    VAR kind: SYSTEM.INT32): SYSTEM.INT32;
+  VAR real, rel: ARRAY PathLen OF CHAR; fd: SYSTEM.INT32; i, n: LONGINT;
+BEGIN
+  fd := COpen(k.root, path, kind, real, LEN(real));
+  IF (kind = File) OR (kind = Directory) THEN
+    (* its path under the root: the root "/" is a prefix of none *)
+    IF k.root = "/" THEN n := 0 ELSE n := Strings.Length(k.root) END;
+    i := 0; WHILE real[n + i] # 0X DO rel[i] := real[n + i]; INC(i) END;
+    rel[i] := 0X;
+    IF rel = "" THEN rel := "/" END;
+    IF ~GemAccess.Allowed(x, k, rel) THEN
+      IF kind = File THEN CClose(fd) END;
+      kind := Missing; fd := -1
+    END
+  END;
+  RETURN fd
+END Open;
+
+(* Answers r, a request for a file of capsule k, whose root is one
+   Resolve gave. *)
+PROCEDURE Serve*(x: GemServer.Exchange; k: GemConfig.Capsule; VAR r: GemRequest.Request);
   VAR path: ARRAY PathLen OF CHAR; type: ARRAY 64 OF CHAR;
     meta: ARRAY GemServer.MaxMeta + 1 OF CHAR;
     kind, fd: SYSTEM.INT32; n: LONGINT;
 BEGIN
-  IF Hidden(r.path) OR (Strings.Length(root) + Strings.Length(r.path) + 16 >= PathLen) THEN
+  IF Hidden(r.path) OR (Strings.Length(k.root) + Strings.Length(r.path) + 16 >= PathLen) THEN
     IF x.Header(51, "not found") THEN END; RETURN
   END;
-  COPY(root, path); Strings.Append(r.path, path);
-  fd := COpen(root, path, kind);
+  COPY(k.root, path); Strings.Append(r.path, path);
+  fd := Open(x, k, path, kind);
+  IF x.status # 0 THEN RETURN END;  (* refused by GemAccess *)
   IF kind = Directory THEN
     n := Strings.Length(r.path);
     IF r.path[n - 1] # "/" THEN
@@ -163,7 +192,8 @@ BEGIN
       IF x.Header(31, meta) THEN END; RETURN
     END;
     Strings.Append(Index, path);
-    fd := COpen(root, path, kind);
+    fd := Open(x, k, path, kind);
+    IF x.status # 0 THEN RETURN END;
     COPY(Index, path)  (* its name, for its type *)
   ELSE
     COPY(r.path, path)

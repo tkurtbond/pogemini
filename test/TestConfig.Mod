@@ -53,13 +53,13 @@ BEGIN
 END Bad;
 
 PROCEDURE Main;
-  VAR k, k2: GemConfig.Capsule; why: ARRAY 256 OF CHAR;
+  VAR k, k2: GemConfig.Capsule; a: GemConfig.Area; why: ARRAY 256 OF CHAR;
 BEGIN
   IF Platform.System("rm -rf ../build/test-config && mkdir -p ../build/test-config") # 0 THEN
     Check.Check(FALSE, "make ../build/test-config"); Check.Summary; RETURN
   END;
 
-  Write("good", "# every setting|listen ::1|  port 1966  |deadline	2500|certdir /var/lib/po gemini   # a comment|| # and another|capsule Example.ORG|  alias WWW.example.org|  alias example.net|  root /srv/a#b c |  cert /etc/a.crt|  key /etc/a.key|capsule 127.0.0.1|capsule ::1");
+  Write("good", "# every setting|listen ::1|  port 1966  |deadline	2500|certdir /var/lib/po gemini   # a comment|| # and another|capsule Example.ORG|  alias WWW.example.org|  alias example.net|  root /srv/a#b c |  cert /etc/a.crt|  key /etc/a.key|require /private/|  identity SHA256:0123456789ABCDEF0123456789abcdef0123456789abcdef0123456789abcdef|  identity sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff|require /a b|capsule 127.0.0.1|  require /|capsule ::1");
   Check.Check(Read("good"), "a file with every setting");
   IF error # "" THEN Out.String("  error: "); Out.String(error); Out.Ln END;
   Check.Check((c.listen = "::1") & (c.port = 1966) & (c.deadline = 2500), "  ... listen, port and deadline");
@@ -70,8 +70,22 @@ BEGIN
     & (k.aliases[1] = "example.net"), "  ... the first's names, in lower case");
   Check.Check((k.root = "/srv/a#b c") & (k.cert = "/etc/a.crt") & (k.key = "/etc/a.key"),
     "  ... its root (# inside a value kept), cert and key");
+  Check.Check((k.nAreas = 2) & (k.areas[0].path = "/private") & (k.areas[1].path = "/a b")
+    & (k.areas[1].nIds = 0), "  ... its requires, the final / dropped, a space kept");
+  a := k.areas[0];
+  Check.Check((a.nIds = 2)
+    & (a.ids[0] = "SHA256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+    & (a.ids[1] = "SHA256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"),
+    "  ... and the first's identities, as libtls writes a hash");
   Check.Check((c.capsules[1].name = "127.0.0.1") & (c.capsules[2].name = "::1")
     & (c.capsules[2].cert = ""), "  ... the others, addresses, without cert");
+  Check.Check((c.capsules[1].nAreas = 1) & (c.capsules[1].areas[0].path = "/")
+    & (c.capsules[2].nAreas = 0), "  ... a require of / in the second, none in the third");
+  Check.Check(GemConfig.Within("/private", "/private") & GemConfig.Within("/private/a.gmi", "/private")
+    & GemConfig.Within("/private/", "/private") & ~GemConfig.Within("/privateer", "/private")
+    & ~GemConfig.Within("/", "/private") & ~GemConfig.Within("/priv", "/private")
+    & GemConfig.Within("/", "/") & GemConfig.Within("/x/y", "/"),
+    "Within: a path, segment by segment");
   Check.Check((c.Find("www.example.org") = k) & (c.Find("example.org") = k)
     & (c.Find("::1") = c.capsules[2]) & (c.Find("example.com") = NIL), "Find: by name and alias");
   Check.Check(c.Add("", TRUE, k2, why) & (c.capsules[0] = k2) & (c.capsules[1] = k) & (c.n = 4),
@@ -101,6 +115,27 @@ BEGIN
     "../build/test-config/bad:2: a second capsule for a.example");
   Bad("an alias that is another's name", "capsule a.example|capsule b.example|alias a.example",
     "../build/test-config/bad:3: a second capsule for a.example");
+  Bad("require outside a capsule", "require /x", "../build/test-config/bad:1: require outside a capsule");
+  Bad("identity outside a require", "capsule a.example|identity SHA256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "../build/test-config/bad:2: identity outside a require");
+  Bad("identity after a new capsule", "capsule a.example|require /x|capsule b.example|identity SHA256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "../build/test-config/bad:4: identity outside a require");
+  Bad("an identity too short", "capsule a.example|require /x|identity SHA256:0123",
+    "../build/test-config/bad:3: an identity is SHA256: and 64 hex digits");
+  Bad("an identity not hex", "capsule a.example|require /x|identity SHA256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdeg",
+    "../build/test-config/bad:3: an identity is SHA256: and 64 hex digits");
+  Bad("an identity not SHA-256", "capsule a.example|require /x|identity SHA512:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "../build/test-config/bad:3: an identity is SHA256: and 64 hex digits");
+  Bad("a relative require", "capsule a.example|require private",
+    "../build/test-config/bad:2: a require is a path beginning with /");
+  Bad("a require with ..", "capsule a.example|require /a/../b",
+    "../build/test-config/bad:2: a require with an empty, . or .. segment: /a/../b");
+  Bad("a require with .", "capsule a.example|require /a/.",
+    "../build/test-config/bad:2: a require with an empty, . or .. segment: /a/.");
+  Bad("a require with //", "capsule a.example|require //",
+    "../build/test-config/bad:2: a require with an empty, . or .. segment: //");
+  Bad("a require twice", "capsule a.example|require /a|require /a/",
+    "../build/test-config/bad:3: a second require for /a");
   Bad("an underscore", "capsule a_b.example", "../build/test-config/bad:1: not a host name: a_b.example");
   Bad("a hyphen first", "capsule -a.example", "../build/test-config/bad:1: not a host name: -a.example");
   Bad("a hyphen last", "capsule a-.example", "../build/test-config/bad:1: not a host name: a-.example");

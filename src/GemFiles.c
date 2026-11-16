@@ -18,7 +18,8 @@
 enum { FILE_ = 0, MISSING = 1, DIRECTORY = 2, FAILED = 3 };
 
 int32_t gemfiles_resolve(const char *path, char *out, int64_t max) NAME("resolve");
-int32_t gemfiles_open(const char *root, const char *path, int32_t *kind) NAME("open");
+int32_t gemfiles_open(const char *root, const char *path, int32_t *kind,
+    char *out, int64_t max) NAME("open");
 int64_t gemfiles_read(int32_t fd, char *buf, int64_t pos, int64_t len) NAME("read");
 void gemfiles_close(int32_t fd) NAME("close");
 
@@ -48,8 +49,10 @@ static int missing(int e)
    DIRECTORY for a directory, MISSING for nothing that may be served
    (none, outside root, a name under root beginning with ".", not
    readable, not a regular file), FAILED for anything else (too many
-   files open, an I/O error). */
-int32_t gemfiles_open(const char *root, const char *path, int32_t *kind)
+   files open, an I/O error). Its resolved path, for a file or a
+   directory, is in out, of max bytes; "" otherwise. */
+int32_t gemfiles_open(const char *root, const char *path, int32_t *kind,
+    char *out, int64_t max)
 {
 	char real[PATH_MAX];
 	size_t n = strlen(root);
@@ -57,6 +60,7 @@ int32_t gemfiles_open(const char *root, const char *path, int32_t *kind)
 	struct stat st;
 	int fd;
 
+	out[0] = '\0';
 	if (realpath(path, real) == NULL) {
 		*kind = missing(errno) ? MISSING : FAILED;
 		return -1;
@@ -74,6 +78,11 @@ int32_t gemfiles_open(const char *root, const char *path, int32_t *kind)
 			*kind = MISSING;
 			return -1;
 		}
+	if ((int64_t)strlen(real) >= max) {
+		*kind = MISSING;
+		return -1;
+	}
+	strcpy(out, real);
 	/* O_NONBLOCK, so a FIFO doesn't stop the server in open; O_NOFOLLOW
 	   in case the last name became a link since realpath */
 	fd = open(real, O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC);
@@ -89,6 +98,8 @@ int32_t gemfiles_open(const char *root, const char *path, int32_t *kind)
 	if (!S_ISREG(st.st_mode)) {
 		close(fd);
 		*kind = S_ISDIR(st.st_mode) ? DIRECTORY : MISSING;
+		if (*kind == MISSING)
+			out[0] = '\0';
 		return -1;
 	}
 	*kind = FILE_;

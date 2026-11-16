@@ -15,7 +15,7 @@ starting point.
 
 ## Status
 
-As of 2026-11-16, Phases 0 to 4 of PLAN.md are done: `src/GemServer`
+As of 2026-11-16, Phases 0 to 5 of PLAN.md are done: `src/GemServer`
 and `src/pogemini` serve a page naming the capsule asked for, tested by
 `TestServe` with our own client; `src/GemRequest` parses and checks each
 request (`TestParse` on its own, `TestRequests` through the server, with
@@ -27,7 +27,10 @@ a made certificate reused, and what stops the server); and
 `src/GemFiles` (with its C part, `src/GemFiles.c`) serves the files
 under a capsule's root (`TestFiles`: MIME types, directories and
 redirects, links in and out of the root, hidden names, a FIFO, a large
-file). Next is Phase 5, client certificates.
+file); and `src/GemAccess` refuses paths inside a capsule's requires
+without a fit client certificate, 60, 61 or 62 (`TestCerts`, with the
+tests' client certificates). Next is Phase 6, running it: logging with
+the time, SIGTERM, limits, systemd, dropping privileges.
 
 **poc 0.13.0 or later, and polibtls and posockets built by the same
 poc.** A poc library works only with the poc that built it. Both were

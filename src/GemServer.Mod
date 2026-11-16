@@ -45,6 +45,8 @@ TYPE
     peer-: Sockets.Address;   (* the client's *)
     request-: ARRAY MaxRequest + 1 OF CHAR;  (* the line, without CR LF *)
     certHash-: Tls.String;    (* the client certificate's, NIL for none *)
+    notBefore-, notAfter-: HUGEINT;  (* its dates, seconds since 1970;
+                                 -1 for none *)
     status-: INTEGER;         (* the header's, 0 until sent *)
     failed-: BOOLEAN;         (* a write failed; the rest do nothing *)
     conn: Tls.Connection
@@ -156,6 +158,7 @@ PROCEDURE (h: Handler) Run*;
 BEGIN
   s := h.server; closed := FALSE;
   NEW(x); x.peer := h.peer; x.status := 0; x.failed := FALSE; x.certHash := NIL;
+  x.notBefore := -1; x.notAfter := -1;
   IF ~s.ctx.AcceptSocket(h.s.fd, x.conn) THEN
     Out.String(h.peer.host); Out.String(" failed: "); Out.String(s.ctx.error.text^); Out.Ln
   ELSE
@@ -163,6 +166,9 @@ BEGIN
     ok := TlsTasks.Handshake(x.conn) & ReadRequest(x);
     IF ok THEN
       x.certHash := x.conn.PeerCertHash();
+      IF x.certHash # NIL THEN
+        x.notBefore := x.conn.PeerCertNotBefore(); x.notAfter := x.conn.PeerCertNotAfter()
+      END;
       IF x.request = "" THEN
         IF x.Header(59, "request too long, or no CR LF") THEN END
       ELSE
