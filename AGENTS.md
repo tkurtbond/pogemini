@@ -20,7 +20,7 @@ Phase 1, a first server.
 
 **poc 0.13.0 or later, and polibtls and posockets built by the same
 poc.** A poc library works only with the poc that built it. Both were
-installed in `~/.local/lib/poc` on 2026-11-16 (polibtls at 06e31a5,
+installed in `~/.local/lib/poc` on 2026-11-16 (polibtls at 9acaecc,
 posockets at 059b47d), each from a `git archive` of its commit by
 `make install`. After a poc upgrade, reinstall both the same way;
 `make deps` says whether they match.
