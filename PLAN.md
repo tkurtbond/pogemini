@@ -602,7 +602,8 @@ for the system it runs on (by `uname -s`) in `$(DOCDIR)/rc.d`, mode
   jherek (OpenBSD 7.9), amd64: start, status, a second start refused,
   a fetch (20) and a 1024-byte request (51) logged, stop with the
   pidfiles gone, and a bad configuration; and `gmake install` and
-  `uninstall` with each script. Not run on the i386 hosts.
+  `uninstall` with each script. The same on the i386 hosts, yishana
+  (NetBSD 11.0) and cymoril (OpenBSD 7.9), with the same results.
 
 ## Open questions
 
