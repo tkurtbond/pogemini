@@ -520,10 +520,43 @@ on first use is suspect. GemFiles' `realpath` and `open` are the other
 libc calls in tasks; run the same way, they fit in a 16 KiB stack on
 every host.
 
-### Phase 8: documentation and install
+### Phase 8: documentation and install [done]
 
 A user's guide, an example configuration, `make install`, on Linux and
 the BSDs.
+
+Done 2026-11-16:
+
+- README.md is the user's guide: requirements, building and installing,
+  a first capsule, a configuration, running it as a service.
+  `doc/pogemini.1` is the reference, in mdoc so that mandoc (the BSDs)
+  and groff (Linux) both read it; `mandoc -T lint -W warning` is clean.
+- `contrib/pogemini.conf` is a commented example configuration;
+  `TestConfig` reads it and checks every setting, so it can't drift
+  from the parser.
+- `make install` puts `bin/pogemini`, `man1/pogemini.1` and
+  `share/doc/pogemini` (README, LICENSE, the example configuration,
+  the systemd unit) under `PREFIX`, `~/.local` by default, with
+  `DESTDIR` for packaging; `make uninstall` removes them. Decisions:
+  - install doesn't build, so it can be run as root after `make` as
+    the user, and fails, saying so, if nothing was built;
+  - `POCLIBDIR` no longer follows `PREFIX`: it is where the libraries
+    are, not where the program goes;
+  - `MANDIR` is `$(PREFIX)/man` on NetBSD and OpenBSD, whose `man`
+    looks there (NetBSD's default path is `/usr/{share,X11R7,pkg,local}/man`),
+    and `$(PREFIX)/share/man` on Linux and FreeBSD;
+  - no rc script for the BSDs yet; README says how to start it from rc.
+- Checked: on Linux, `make clean && make test` (299 ok), install into a
+  temporary prefix, `man -l` the page, the README's first capsule from
+  the installed program (status 20, the certificate made once), and
+  uninstall leaving no file. On all five BSD hosts, `gmake test` (exit
+  0; ok 296 to 298, by the clients each lacks), then install, `man
+  pogemini` through `MANPATH`, the installed program run, and
+  uninstall leaving no file. OpenBSD's `man` notes that a prefix's
+  `mandoc.db` lacks the page until `makewhatis` is run on it; it shows
+  the page regardless. The program links libtls (with OpenSSL or
+  LibreSSL under it) and the C library, nothing
+  of poc's.
 
 ## Open questions
 

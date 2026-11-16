@@ -1,0 +1,365 @@
+.\" pogemini(1): the manual page for pogemini, a Gemini server.
+.\" mdoc, so it reads the same with mandoc (the BSDs) and groff (Linux).
+.Dd November 16, 2026
+.Dt POGEMINI 1
+.Os
+.Sh NAME
+.Nm pogemini
+.Nd a server for the Gemini protocol
+.Sh SYNOPSIS
+.Nm
+.Op Fl config Ar file
+.Op Fl listen Ar host
+.Op Fl port Ar port
+.Op Fl deadline Ar ms
+.Op Fl connections Ar n
+.Op Fl user Ar name
+.Op Fl certdir Ar dir
+.Op Fl n Ar count
+.Op Fl host Ar name ...
+.Op Fl root Ar dir
+.Op Fl cert Ar file Fl key Ar file
+.Op Fl require Ar path ...
+.Sh DESCRIPTION
+.Nm
+serves capsules, sites for the Gemini protocol, over TLS: for each, the
+files under its root directory.
+It serves every connection in a task of its own, in one thread, so a
+slow or stalled client holds up no other, and gives each connection a
+deadline for the whole exchange.
+.Pp
+The capsules come from a configuration file,
+.Fl config ,
+and one more may be given on the command line: its name is the first
+.Fl host ,
+any others its aliases, with
+.Fl root ,
+.Fl cert ,
+.Fl key
+and
+.Fl require .
+It comes before those in the file.
+Without
+.Fl host ,
+it is a capsule for any host name, and needs
+.Fl cert
+and
+.Fl key .
+The other options override the file's settings of the same name,
+described under
+.Sx CONFIGURATION .
+At least one capsule must be given.
+.Pp
+The options are:
+.Bl -tag -width "-connections n"
+.It Fl config Ar file
+Read the configuration from
+.Ar file .
+.It Fl listen Ar host
+Listen on the address
+.Ar host
+only, rather than on every local address, IPv6 and IPv4.
+.It Fl port Ar port
+Listen on
+.Ar port ;
+the default is 1965, Gemini's.
+With 0, the kernel chooses one.
+.It Fl deadline Ar ms
+Give each connection
+.Ar ms
+milliseconds, from the TLS handshake to its end; 10000 by default, at
+most 3600000.
+.It Fl connections Ar n
+Serve at most
+.Ar n
+connections at once, 256 by default, at most 100000; the rest wait in
+the kernel's listen queue until one ends.
+.It Fl user Ar name
+Started as root, serve as the user
+.Ar name ;
+see
+.Sx SECURITY .
+.It Fl certdir Ar dir
+Make and keep self-signed certificates in
+.Ar dir ;
+see
+.Sx CERTIFICATES .
+.It Fl n Ar count
+Serve
+.Ar count
+connections, wait for them to end, and exit 0; for testing.
+.It Fl host Ar name
+The command line's capsule's name, or, after the first, an alias.
+.It Fl root Ar dir
+Its root: the files it serves.
+.It Fl cert Ar file Fl key Ar file
+Its certificate and private key, in PEM.
+.It Fl require Ar path
+A path in it that needs a client certificate, any; see
+.Sx CLIENT CERTIFICATES .
+.El
+.Pp
+Its first line on standard output is
+.Dq port Ar n ,
+the port it listens on, so that a program that started it on port 0
+learns which the kernel chose.
+Then it logs a line per connection, beginning with the time, UTC:
+.Bd -literal -offset indent
+<time> <client address> <status> <request> <client certificate | ->
+<time> <client address> failed: <why>
+.Ed
+.Pp
+The request is written with its control characters as
+.Li %XX ,
+so a line is always one line, and a client certificate as its SHA-256
+hash,
+.Li SHA256:
+and 64 hexadecimal digits.
+.Sh CONFIGURATION
+The file has a line per setting: a keyword, then its value, the rest
+of the line with its spaces trimmed, so a file name may contain spaces.
+A name or a number is one word.
+.Ql #
+begins a comment, and blank lines are ignored.
+The global settings come first:
+.Bl -tag -width "connections n"
+.It Ic listen Ar host
+As
+.Fl listen .
+.It Ic port Ar port
+As
+.Fl port .
+.It Ic deadline Ar ms
+As
+.Fl deadline .
+.It Ic connections Ar n
+As
+.Fl connections .
+.It Ic user Ar name
+As
+.Fl user .
+.It Ic certdir Ar dir
+As
+.Fl certdir .
+.El
+.Pp
+Then each capsule, everything from its
+.Ic capsule
+line to the next:
+.Bl -tag -width "identity hash"
+.It Ic capsule Ar name
+A capsule, for the host
+.Ar name ,
+a DNS name or an IP address, written plainly
+.Pq Li ::1 , not Li [::1] ,
+in ASCII; an internationalised name is written in its
+.Li xn--
+form.
+.It Ic alias Ar name
+Another name for it.
+.It Ic root Ar dir
+Its root.
+Without one, it answers
+.Li /
+with a page naming it, and anything else with 51.
+.It Ic cert Ar file
+Its certificate, in PEM.
+.It Ic key Ar file
+Its private key, in PEM.
+.It Ic require Ar path
+A path that needs a client certificate.
+.It Ic identity Ar hash
+After a
+.Ic require :
+a client certificate it accepts, by its SHA-256 hash, as the log shows
+it.
+.El
+.Pp
+The first capsule is the one shown to a client that names no host in
+TLS (SNI), and the one whose certificate it sees.
+A request is answered by the capsule whose name or alias its host is,
+or else by the one for any host.
+A request for a host no capsule has, or for another port than the one
+listened on, is refused with 53:
+.Nm
+is no proxy.
+.Pp
+.Pa contrib/pogemini.conf ,
+installed in the documentation directory, is an example.
+.Sh FILES SERVED
+A request's path names a file under the capsule's root:
+.Li /a/b.gmi
+is
+.Pa <root>/a/b.gmi .
+A regular file is served with status 20 and the MIME type its
+extension gives,
+.Li text/gemini
+for
+.Pa .gmi
+and
+.Pa .gemini ,
+and
+.Li application/octet-stream
+for one unknown; text is taken to be UTF-8.
+A directory asked for with a final
+.Ql /
+is served its
+.Pa index.gmi ;
+asked for without, it is redirected (31) to the same path with the
+.Ql /
+added.
+There are no directory listings.
+.Pp
+Everything else is answered 51, not found: a name that isn't there, a
+directory without
+.Pa index.gmi ,
+anything not a regular file, anything the server can't read, a name
+beginning with
+.Ql \&.
+.Pq Pa .git ,
+and anything whose real path, once symbolic links are resolved, lies
+outside the root or passes through such a name.
+A symbolic link from one file under the root to another is followed.
+A failure of the server's own, such as too many files open, is 40.
+.Pp
+A request that isn't a URL, or that the specification forbids (over
+1024 bytes, with user information or a fragment, or a path that climbs
+above the root), is refused with 59; one for another scheme than
+.Li gemini ,
+with 53.
+.Sh CLIENT CERTIFICATES
+A request for a path within a
+.Ic require
+.Pq or Fl require
+needs a client certificate.
+A require covers its path and everything below it, segment by segment:
+.Li /private
+covers
+.Li /private/a.gmi ,
+not
+.Li /privateer ,
+and
+.Li /
+covers the whole capsule.
+Without a certificate the request is answered 60, with one outside its
+dates 62, and, if
+.Ic identity
+lines follow the require, with one not among them 61.
+Where requires nest, each applies.
+A symbolic link can't lead into a require from outside it.
+.Pp
+Client certificates are self-signed, as Gemini's are, and are
+checked against no authority.
+.Sh CERTIFICATES
+A capsule given neither
+.Ic cert
+nor
+.Ic key
+gets a self-signed certificate, ECDSA P-256, for its name and aliases,
+valid ten years.
+It is made by running
+.Xr openssl 1 ,
+which must be on
+.Ev PATH ,
+the first time, and kept in the certificate directory as
+.Pa <name>.crt
+and
+.Pa <name>.key ,
+the key readable by its owner only; later runs use it as it is.
+Clients pin the certificate they first see from a capsule, so keep the
+directory: a new certificate would look to them like an attack.
+A capsule for any host must be given its certificate and key.
+.Sh SECURITY
+Started as root,
+.Nm
+becomes
+.Ic user ,
+with that user's groups, once it has read its keys and listens, so
+keys only root can read and ports below 1024 can be used, and files are
+served as that user.
+Started as root without one it refuses to run, since a server reading
+files as root is one mistake from serving any of them;
+.Fl user Ar root
+keeps root for whoever really wants it.
+Not started as root,
+.Ic user
+may name only the user it runs as.
+Certificates are made before the change, so as root, in root's
+certificate directory unless
+.Ic certdir
+names another.
+.Sh SIGNALS
+.Bl -tag -width "SIGTERM, SIGINT"
+.It Dv SIGTERM , Dv SIGINT
+Stop: close the listeners, so new clients are refused at once, wait for
+the connections in progress, which their deadline bounds, and exit 0,
+logging
+.Bd -literal -offset indent
+<time> stopping on signal <n>, connections in progress: <k>
+<time> stopped
+.Ed
+.Pp
+A second signal ends it at once.
+.El
+.Sh ENVIRONMENT
+.Bl -tag -width "XDG_DATA_HOME"
+.It Ev XDG_DATA_HOME
+The default certificate directory is
+.Pa $XDG_DATA_HOME/pogemini/certs .
+.It Ev HOME
+Without
+.Ev XDG_DATA_HOME ,
+it is
+.Pa $HOME/.local/share/pogemini/certs .
+.It Ev PATH
+Searched for
+.Xr openssl 1 .
+.El
+.Sh EXIT STATUS
+0 after a stop by a signal, or after
+.Fl n Ar count
+connections; 1 for a mistake in the configuration, or a failure to
+start (a certificate that can't be read or made, an address that can't
+be listened on, a user it can't become); 2 for a mistake in the
+options.
+A mistake is reported on standard error.
+.Sh EXAMPLES
+Serve a directory, with a certificate made the first time:
+.Bd -literal -offset indent
+pogemini -host example.org -root /srv/gemini/example.org
+.Ed
+.Pp
+Serve the capsules in a file, started as root and serving as
+.Li gemini :
+.Bd -literal -offset indent
+pogemini -config /etc/pogemini.conf -user gemini
+.Ed
+.Pp
+A configuration with two capsules, one with its own certificate and a
+part for a single client certificate:
+.Bd -literal -offset indent
+port 1965
+user gemini
+certdir /var/lib/pogemini/certs
+
+capsule example.org
+  alias www.example.org
+  root /srv/gemini/example.org
+  cert /etc/pogemini/example.org.crt
+  key /etc/pogemini/example.org.key
+  require /private
+    identity SHA256:3f0c...
+
+capsule example.net
+  root /srv/gemini/example.net
+.Ed
+.Sh SEE ALSO
+.Xr openssl 1 ,
+.Xr tls_init 3
+.Rs
+.%T Gemini network protocol specification
+.%U gemini://geminiprotocol.net/docs/protocol-specification.gmi
+.Re
+.Sh AUTHORS
+.An T. Kurt Bond ,
+with the aid of AI.

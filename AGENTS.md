@@ -33,8 +33,12 @@ tests' client certificates); and running it (`src/GemServer.c`,
 `src/GemUser`): the time in the log, a clean stop on SIGTERM or
 SIGINT, a limit on connections at once, `-user`, and a systemd unit in
 `contrib/` (`TestRun`); and `gmake test` passes on FreeBSD, NetBSD and
-OpenBSD, amd64 and i386 ("Testing on the BSD hosts"). Next is Phase 8,
-documentation and install.
+OpenBSD, amd64 and i386 ("Testing on the BSD hosts"); and the
+documentation and install: README.md (the user's guide),
+`doc/pogemini.1` (the manual page, mdoc), `contrib/pogemini.conf` (an
+example configuration, which `TestConfig` reads), and `make install`,
+checked on Linux and all five BSD hosts. Every phase of PLAN.md's
+roadmap is done.
 
 **poc 0.13.0 or later, and polibtls and posockets built by the same
 poc.** A poc library works only with the poc that built it. Both were
@@ -63,6 +67,14 @@ and posockets are taken from `POCLIBDIR` (`~/.local/lib/poc`). The
 integer size model is `-OC`, the one they are installed in. Add a
 program to `PROGS`, a test to `TESTS`. `make` also makes the tests'
 certificates (`test/make-certs.sh`, polibtls's) into `build/certs`.
+`make install` (and `uninstall`) puts the program, `doc/pogemini.1`
+and the documentation under `PREFIX` (`~/.local`), honouring
+`DESTDIR`, `BINDIR`, `MANDIR` and `DOCDIR`; `MANDIR` is
+`$(PREFIX)/man` on NetBSD and OpenBSD, `$(PREFIX)/share/man`
+elsewhere. It doesn't build. `POCLIBDIR` doesn't follow `PREFIX`.
+After changing an option or setting, update `doc/pogemini.1`,
+README.md and `contrib/pogemini.conf` to match; check the page with
+`mandoc -T lint -W warning doc/pogemini.1`.
 
 ## Test
 

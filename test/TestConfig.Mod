@@ -159,6 +159,19 @@ BEGIN
     & GemConfig.ValidName("2001:db8::1") & GemConfig.ValidName("10.0.0.1"),
     "ValidName: names and addresses");
 
+  (* The example installed with the server: it must stay one the server
+     reads, and say what its comments say. *)
+  c := GemConfig.New(); error := "";
+  Check.Check(GemConfig.Read(c, "../contrib/pogemini.conf", error), "contrib/pogemini.conf: read");
+  IF error # "" THEN Out.String("  error: "); Out.String(error); Out.Ln END;
+  Check.Check((c.listen = "") & (c.port = 1965) & (c.deadline = 10000) & (c.connections = 256)
+    & (c.user = "gemini") & (c.certdir = "/var/lib/pogemini/certs") & (c.n = 2)
+    & (c.capsules[0].name = "example.org") & (c.capsules[0].nAliases = 1)
+    & (c.capsules[0].cert # "") & (c.capsules[0].nAreas = 1) & (c.capsules[0].areas[0].nIds = 1)
+    & (c.capsules[1].name = "example.net") & (c.capsules[1].cert = "")
+    & (c.capsules[1].nAreas = 1) & (c.capsules[1].areas[0].nIds = 0),
+    "  ... its settings and two capsules");
+
   c := GemConfig.New();
   Check.Check(~GemConfig.Read(c, "../build/test-config/none", error)
     & (error = "../build/test-config/none: can't be read"), "a missing file");

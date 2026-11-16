@@ -6,10 +6,26 @@
 # have been built by the poc in use, since poc refuses a library another
 # poc built: make deps checks. poc writes each module's .sym, .ll and .o,
 # and the programs, into $(BUILD), so make must not build two at once.
+#
+# make install puts the program, its manual page and its documentation
+# (README, the example configuration, the systemd unit) under $(PREFIX),
+# ~/.local by default, or under $(DESTDIR)$(PREFIX) for a package.
+# POCLIBDIR doesn't follow PREFIX: it is where the libraries were
+# installed, not where this goes. Build first as yourself, then install
+# as whoever may write there: install doesn't build.
 
 POC      ?= poc
 PREFIX ?= $(HOME)/.local
-POCLIBDIR ?= $(PREFIX)/lib/poc
+POCLIBDIR ?= $(HOME)/.local/lib/poc
+BINDIR ?= $(PREFIX)/bin
+DOCDIR ?= $(PREFIX)/share/doc/pogemini
+# Where each system's man looks under a prefix: share/man on Linux and
+# FreeBSD, man on OpenBSD and NetBSD.
+ifneq ($(filter OpenBSD NetBSD,$(shell uname -s)),)
+MANDIR ?= $(PREFIX)/man
+else
+MANDIR ?= $(PREFIX)/share/man
+endif
 # The size model, the one polibtls and posockets are installed in.
 POCFLAGS := -OC
 
@@ -38,7 +54,7 @@ TESTMODS := $(wildcard test/*.Mod test/*.c)
 PROGBINS := $(PROGS:%=$(BUILD)/%)
 TESTBINS := $(TESTS:%=$(BUILD)/%)
 
-.PHONY: all deps certs test clean
+.PHONY: all deps certs test clean install uninstall
 .NOTPARALLEL:
 
 all: deps $(PROGBINS) $(TESTBINS) certs
@@ -75,3 +91,16 @@ test: all
 
 clean:
 	rm -rf $(BUILD)
+
+install:
+	@test -x $(BUILD)/pogemini || { echo "install: run make first"; exit 1; }
+	install -d $(DESTDIR)$(BINDIR) $(DESTDIR)$(MANDIR)/man1 $(DESTDIR)$(DOCDIR)
+	install -m 755 $(BUILD)/pogemini $(DESTDIR)$(BINDIR)/pogemini
+	install -m 644 doc/pogemini.1 $(DESTDIR)$(MANDIR)/man1/pogemini.1
+	install -m 644 README.md LICENSE contrib/pogemini.conf contrib/pogemini.service $(DESTDIR)$(DOCDIR)
+
+uninstall:
+	rm -f $(DESTDIR)$(BINDIR)/pogemini $(DESTDIR)$(MANDIR)/man1/pogemini.1
+	rm -f $(DESTDIR)$(DOCDIR)/README.md $(DESTDIR)$(DOCDIR)/LICENSE
+	rm -f $(DESTDIR)$(DOCDIR)/pogemini.conf $(DESTDIR)$(DOCDIR)/pogemini.service
+	-rmdir $(DESTDIR)$(DOCDIR)
