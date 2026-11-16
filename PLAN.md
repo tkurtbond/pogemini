@@ -472,7 +472,7 @@ first, `-connections 2` not; the time on every line; `-user` as the
 user it is, root and an unknown user refused, and, only as root, no
 `-user` refused), and `TestServe`'s exact lines read after the time.
 
-### Phase 7: the BSDs
+### Phase 7: the BSDs [done]
 
 First polibtls's own port, done 2026-11-16 (its Phase 10, b828a53):
 OpenBSD's libtls in base, LibreTLS from packages on FreeBSD and NetBSD,
@@ -480,6 +480,45 @@ its tests passing on amd64 and i386. Then this server's tests, by `gmake test`
 on FreeBSD, OpenBSD and NetBSD hosts, and the self-signed certificate
 made with each system's `openssl`. Anything Linux-only found is fixed
 here, and a finding recorded in AGENTS.md.
+
+Done 2026-11-16: `gmake test` passes on FreeBSD 15.1 amd64 (alerik),
+NetBSD 11.0 amd64 (artos) and i386 (yishana), and OpenBSD 7.9 amd64
+(jherek) and i386 (cymoril), with poc 0.13.0, polibtls at b828a53 and
+posockets at 059b47d installed from `git archive` into the copy's own
+library directory, TestRun passing five times more on each. Nothing in
+the code was Linux-only, and the certificates, made and checked with
+LibreSSL's `openssl` on OpenBSD and OpenSSL 3's elsewhere, needed no
+change. The clients a host lacks are skipped, saying so: gemget
+everywhere, OpenBSD's nc on FreeBSD and NetBSD, gnutls-cli on NetBSD
+and jherek. Two faults, both in Phase 6's code and both only on the
+BSDs:
+
+- **A signal sent as soon as the port was printed killed the server**
+  (NetBSD amd64, now and then): Serve installed the handler, after
+  pogemini printed `port`, so a test that read the port and sent
+  SIGINT at once could find the default action still in place. Listen
+  installs it now, before the port can be known.
+- **The log's time overran a task's stack** (NetBSD i386, every run
+  that served a request; status 139, a segfault in `OPENSSL_cleanup` at
+  exit, walking a heap something had overwritten). The first
+  `gmtime_r` loads the UTC zone (`tzload`), with large buffers on the
+  stack, and the first was in a connection's task, on a 64 KiB stack.
+  Run in a thread with a stack of a given size (with a guard page), the
+  first `gmtime_r` and `strftime` needs more than 64 KiB on NetBSD
+  (amd64 and i386 alike: 64 KiB crashed, 80 KiB did not), more than 32
+  on OpenBSD, and fits in 16 on FreeBSD and glibc. Where it doesn't fit
+  a task, it writes below the stack without touching the guard page,
+  so a large frame corrupts whatever lies there, or nothing (artos, by
+  luck). `GemServer.-now` now works the date out from `time()` by
+  arithmetic (Hinnant's `civil_from_days`), with no zone at all; it
+  matched glibc's `gmtime_r` for 1,538,207 times from 1970 to 2400,
+  and runs in a 16 KiB thread on NetBSD and OpenBSD.
+
+So C that a task calls must fit in a task's stack, and libc may use
+far more than its interface suggests: a function that loads something
+on first use is suspect. GemFiles' `realpath` and `open` are the other
+libc calls in tasks; run the same way, they fit in a 16 KiB stack on
+every host.
 
 ### Phase 8: documentation and install
 

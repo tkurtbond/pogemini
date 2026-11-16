@@ -297,11 +297,15 @@ BEGIN IF n < 1 THEN s.limit := 1 ELSE s.limit := n END
 END SetLimit;
 
 (* Listens on port at host, "" for every local address (IPv6 and IPv4
-   alike), port 0 for one the kernel chooses: s.port says which. *)
+   alike), port 0 for one the kernel chooses: s.port says which. It
+   catches SIGTERM and SIGINT from here on, not only in Serve, so a
+   signal sent as soon as the port is known (by a program that started
+   the server on port 0) stops it cleanly rather than killing it. *)
 PROCEDURE (s: Server) Listen*(host: ARRAY OF CHAR; port: INTEGER;
     VAR err: Sockets.Error): BOOLEAN;
   VAR a: Sockets.Address;
 BEGIN
+  CCatch;
   IF ~Sockets.Listen(host, port, 16, TRUE, s.listeners, s.n, err)
     OR ~Sockets.LocalAddress(s.listeners[0], a, err) THEN
     RETURN FALSE
@@ -313,7 +317,8 @@ END Listen;
 
 (* Serves count connections (0: until a signal stops it), then waits for
    them to end, having closed the listeners. Call it from the program's
-   main body: it runs every task. It catches SIGTERM and SIGINT. *)
+   main body: it runs every task. A signal caught since Listen stops it
+   at once. *)
 PROCEDURE (s: Server) Serve*(count: LONGINT);
   VAR as: ARRAY 2 OF Acceptor; i: INTEGER; stopping: BOOLEAN;
 BEGIN
@@ -321,7 +326,6 @@ BEGIN
   s.count := count;
   (* A client that goes away makes a write fail, not end the program. *)
   Sockets.IgnoreBrokenPipe;
-  CCatch;
   FOR i := 0 TO s.n - 1 DO
     NEW(as[i]); as[i].server := s; as[i].l := s.listeners[i];
     Tasks.Start(as[i], TlsTasks.stackSize)

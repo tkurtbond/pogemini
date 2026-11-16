@@ -15,7 +15,7 @@ starting point.
 
 ## Status
 
-As of 2026-11-16, Phases 0 to 6 of PLAN.md are done: `src/GemServer`
+As of 2026-11-16, Phases 0 to 7 of PLAN.md are done: `src/GemServer`
 and `src/pogemini` serve a page naming the capsule asked for, tested by
 `TestServe` with our own client; `src/GemRequest` parses and checks each
 request (`TestParse` on its own, `TestRequests` through the server, with
@@ -32,7 +32,9 @@ without a fit client certificate, 60, 61 or 62 (`TestCerts`, with the
 tests' client certificates); and running it (`src/GemServer.c`,
 `src/GemUser`): the time in the log, a clean stop on SIGTERM or
 SIGINT, a limit on connections at once, `-user`, and a systemd unit in
-`contrib/` (`TestRun`). Next is Phase 7, the BSDs.
+`contrib/` (`TestRun`); and `gmake test` passes on FreeBSD, NetBSD and
+OpenBSD, amd64 and i386 ("Testing on the BSD hosts"). Next is Phase 8,
+documentation and install.
 
 **poc 0.13.0 or later, and polibtls and posockets built by the same
 poc.** A poc library works only with the poc that built it. Both were
@@ -85,6 +87,26 @@ and removes them at the end; nothing a test runs may fall back to
 with `-cert`. A capsule without a root answers only `/`, with a page
 naming it, so tests that need no files give none. `GemClient`'s
 responses grow as they come, up to 16 MiB.
+
+## Testing on the BSD hosts
+
+As polibtls's AGENTS.md says, and the same hosts (not rackhir without
+asking). Copy the working tree there (`tar` less `build/` and `.git`)
+into a directory under `~/tmp`, with polibtls and posockets from `git
+archive`s, each installed by `gmake install POCLIBDIR=<dir>` there and
+used by `gmake test POCLIBDIR=<dir>`; remove it all when done. Judge a
+run by make's exit status, and count `assertion failed` and core files
+as well as `FAIL`. Run TestRun a few more times: its faults were races.
+
+Found in Phase 7 (PLAN.md):
+
+- **C called in a task must fit its stack**, and libc may need far more
+  than it seems: the first `gmtime_r` loads the UTC zone, needing more
+  than 64 KiB of stack on NetBSD and 32 on OpenBSD, and overran a
+  connection's task, corrupting the heap without touching the guard
+  page. So the log's time is worked out by arithmetic.
+- **Catch a signal before anyone can learn the port**: Listen installs
+  the handler, since a test sends SIGINT as soon as it reads `port`.
 
 ## Conventions
 
