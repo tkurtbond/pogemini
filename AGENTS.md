@@ -53,6 +53,11 @@ As polibtls's, in short:
   before a comment or decision depends on how something behaves.
   Throwaway work goes in a session directory under `/usr/local/sw/tmp`
   (`/tmp` is a RAM disk here), removed when done.
+- **Portable to the BSDs** (PLAN.md, "Portability"): nothing
+  Linux-only (`/proc`, `accept4`, `epoll`, GNU options of commands,
+  Linux paths); differences between systems go in a module's C part.
+  Testing on the BSD hosts follows posockets' AGENTS.md, "Testing on
+  the BSD hosts", once polibtls is ported (Phase 7).
 - **Secrets**: never print, log or commit a key; test certificates are
   generated into `build/certs`.
 - **Bad outside data never halts** (a client's request, a missing file,
