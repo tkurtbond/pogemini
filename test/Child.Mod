@@ -2,63 +2,103 @@ MODULE Child; (* A command run as a child process, for the tests *)
 
 (* The server under test runs as a child process, as it will in use, so
    the tests see what a user sees: its exit status, and its log on
-   standard output. Copied from polibtls's test/TestPeers. Spawn, Wait
-   and ReadLine wait in the kernel and so stop every task: call them
-   outside tasks. *)
+   standard output. Through pounix's UnixProcesses, with UnixFiles'
+   WaitReadable for ReadLine's time limit. Spawn, Wait and ReadLine wait
+   in the kernel and so stop every task: call them outside tasks. *)
 
-IMPORT SYSTEM;
-
-PROCEDURE ["C", "Child.-spawn"] CSpawn(command, input: ARRAY OF CHAR;
-  inputlen: SYSTEM.INT64; VAR out: SYSTEM.INT64): SYSTEM.INT32;
-PROCEDURE ["C", "Child.-wait"] CWait(pid: SYSTEM.INT32; out: SYSTEM.INT64;
-  VAR got: ARRAY OF CHAR; gotmax: SYSTEM.INT64; VAR gotlen: SYSTEM.INT64): SYSTEM.INT32;
-PROCEDURE ["C", "Child.-readline"] CReadLine(out: SYSTEM.INT64;
-  VAR line: ARRAY OF CHAR; max: SYSTEM.INT64; ms: SYSTEM.INT32): SYSTEM.INT32;
-PROCEDURE ["C", "Child.-kill"] CKill(pid: SYSTEM.INT32);
-PROCEDURE ["C", "Child.-interrupt"] CInterrupt(pid: SYSTEM.INT32);
+IMPORT UnixErrors, UnixFiles, UnixProcesses;
 
 TYPE
-  Child* = RECORD pid: SYSTEM.INT32; out: SYSTEM.INT64 END;
+  Child* = RECORD p: UnixProcesses.Process END;
 
 (* Runs command with /bin/sh -c as a child process, giving it
    input[0..inputlen-1] (at most 64 KiB) on its standard input and then
    end of file. FALSE if it couldn't start. Its output, standard error
-   included, must fit 64 KiB until Wait reads it. *)
+   included, must fit 64 KiB until Wait reads it, since nothing reads it
+   before. *)
 PROCEDURE Spawn*(command, input: ARRAY OF CHAR; inputlen: LONGINT;
     VAR c: Child): BOOLEAN;
+  VAR cmd: UnixProcesses.Command; err: UnixErrors.Error; pos, n: LONGINT;
 BEGIN
-  c.pid := CSpawn(command, input, inputlen, c.out);
-  RETURN c.pid > 0
+  cmd := UnixProcesses.NewCommand("/bin/sh");
+  UnixProcesses.Add(cmd, "-c"); UnixProcesses.Add(cmd, command);
+  UnixProcesses.SetInput(cmd, UnixProcesses.pipe);
+  UnixProcesses.SetOutput(cmd, UnixProcesses.pipe);
+  UnixProcesses.SetError(cmd, UnixProcesses.toOutput);
+  IF ~UnixProcesses.Start(cmd, c.p, err) THEN RETURN FALSE END;
+  pos := 0;
+  WHILE pos < inputlen DO
+    IF ~UnixFiles.Write(c.p.in, input, pos, inputlen - pos, n, err) THEN
+      UnixProcesses.Close(c.p);
+      IF UnixProcesses.Wait(c.p, err) THEN END;
+      c.p := NIL;
+      RETURN FALSE
+    END;
+    INC(pos, n)
+  END;
+  UnixProcesses.CloseInput(c.p);
+  RETURN TRUE
 END Spawn;
 
 (* Waits for c to end: its output, standard error included, as much as
-   fits in got, and how much there was in all; its exit status, or -1
-   if it didn't exit normally. *)
+   fits in got, with a 0X after it, and how much there was in all; its
+   exit status, or -1 if it didn't exit normally or never started. *)
 PROCEDURE Wait*(VAR c: Child; VAR got: ARRAY OF CHAR; VAR gotlen: LONGINT): INTEGER;
-  VAR n: SYSTEM.INT64; r: SYSTEM.INT32;
+  VAR err: UnixErrors.Error; rest: ARRAY 4096 OF CHAR; keep, n: LONGINT;
 BEGIN
-  r := CWait(c.pid, c.out, got, LEN(got), n);
-  gotlen := SYSTEM.VAL(LONGINT, n);
-  IF gotlen < LEN(got) THEN got[gotlen] := 0X ELSE got[LEN(got) - 1] := 0X END;
-  RETURN r
+  gotlen := 0; keep := LEN(got) - 1; got[0] := 0X;
+  IF c.p = NIL THEN RETURN -1 END;
+  LOOP
+    IF gotlen < keep THEN
+      IF ~UnixFiles.Read(c.p.out, got, gotlen, keep - gotlen, n, err) THEN EXIT END
+    ELSIF ~UnixFiles.Read(c.p.out, rest, 0, LEN(rest), n, err) THEN EXIT
+    END;
+    IF n = 0 THEN EXIT END;
+    INC(gotlen, n)
+  END;
+  IF gotlen < keep THEN got[gotlen] := 0X ELSE got[keep] := 0X END;
+  UnixProcesses.Close(c.p);
+  IF UnixProcesses.Wait(c.p, err) & c.p.exited THEN RETURN c.p.status END;
+  RETURN -1
 END Wait;
 
 (* Reads c's next line of output, while it runs, into line, the newline
    included, waiting at most ms for each byte; FALSE if its output ended
-   or ms passed first. Wait gets what is left. *)
+   or ms passed first, or c never started. A byte at a time, so it
+   never reads past the line: Wait gets what is left. *)
 PROCEDURE ReadLine*(VAR c: Child; VAR line: ARRAY OF CHAR; ms: LONGINT): BOOLEAN;
-BEGIN RETURN CReadLine(c.out, line, LEN(line), SHORT(ms)) >= 0
+  VAR err: UnixErrors.Error; i, n: LONGINT; ready: BOOLEAN;
+BEGIN
+  i := 0; line[0] := 0X;
+  IF c.p = NIL THEN RETURN FALSE END;
+  LOOP
+    IF i = LEN(line) - 1 THEN EXIT END;
+    IF ~UnixFiles.WaitReadable(c.p.out, ms, ready, err) OR ~ready
+      OR ~UnixFiles.Read(c.p.out, line, i, 1, n, err) OR (n = 0) THEN
+      line[i] := 0X; RETURN FALSE
+    END;
+    INC(i);
+    IF line[i - 1] = 0AX THEN EXIT END
+  END;
+  line[i] := 0X;
+  RETURN TRUE
 END ReadLine;
 
 (* Ends c, as for a server that won't finish by itself, by SIGTERM;
-   Wait for it afterwards. *)
+   Wait for it afterwards. Nothing for a child that never started, as
+   after a failed Spawn. *)
 PROCEDURE Kill*(VAR c: Child);
-BEGIN CKill(c.pid)
+  VAR err: UnixErrors.Error;
+BEGIN
+  IF (c.p # NIL) & UnixProcesses.Signal(c.p, UnixProcesses.terminate, err) THEN END
 END Kill;
 
-(* Sends c SIGINT, as Control-C would. *)
+(* Sends c SIGINT, as Control-C would; nothing for a child that never
+   started. *)
 PROCEDURE Interrupt*(VAR c: Child);
-BEGIN CInterrupt(c.pid)
+  VAR err: UnixErrors.Error;
+BEGIN
+  IF (c.p # NIL) & UnixProcesses.Signal(c.p, UnixProcesses.interrupt, err) THEN END
 END Interrupt;
 
 END Child.

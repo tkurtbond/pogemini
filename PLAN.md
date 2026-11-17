@@ -679,6 +679,14 @@ what is pogemini's policy stays here, in Oberon.
   lacks and for root), with pounix, poDateTime, posockets and polibtls
   installed in the run's own directory, and TestRun passed three more
   times on each, with no core files.
+- **`test/Child.c` is gone** (pounix Phase 7, 2026-11-16): `Child`
+  runs the server through `UnixProcesses` (`/bin/sh -c`, its input
+  through a pipe, its output and errors through another), and
+  `ReadLine` waits for each byte through `UnixFiles.WaitReadable`.
+  `Kill` and `Interrupt` now do nothing for a child that never started,
+  where the C would have signalled process -1. `make test` passed on
+  Linux (299 checks), and `gmake test` on alerik, artos, yishana,
+  jherek and cymoril (296 to 298, as before).
 
 ## Open questions
 

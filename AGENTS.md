@@ -92,7 +92,8 @@ README.md and `contrib/pogemini.conf` to match; check the page with
 
 As polibtls's: one main module per concern in `test/`, run from
 `test/`, printing `ok   - `/`FAIL - ` through `test/Check.Mod` and a
-summary. The server runs as a child process (`test/Child.Mod`), as a
+summary. The server runs as a child process (`test/Child.Mod`, over
+pounix's `UnixProcesses`), as a
 user runs it: `-port 0`, its port read from its first line, `-n count`
 so it exits by itself, and its log, the rest of its output, checked
 after `Child.Wait`. `test/GemClient.Mod` is the client, in tasks, with a
