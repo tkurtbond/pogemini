@@ -50,7 +50,7 @@ MODULE pogemini; (* A Gemini server *)
    without answers "/" with a page naming it, and anything else 51. *)
 
 IMPORT Platform, Out, Err, Args, Strings, Directories, Sockets, Tls,
-  GemServer, GemUser, GemRequest, GemConfig, GemCert, GemFiles, GemAccess;
+  UnixErrors, UnixUsers, GemServer, GemRequest, GemConfig, GemCert, GemFiles, GemAccess;
 
 VAR
   config: GemConfig.Config;
@@ -167,6 +167,7 @@ PROCEDURE Main;
     requires: ARRAY GemConfig.MaxAreas OF GemConfig.Path;
     count, x: LONGINT; i, j, nHosts, nRequires: INTEGER;
     k: GemConfig.Capsule; a: GemConfig.Area; s: GemServer.Server; err: Sockets.Error;
+    uerr: UnixErrors.Error;
 BEGIN
   config := GemConfig.New();
   (* the file first, so the options can override it *)
@@ -224,7 +225,7 @@ BEGIN
   IF config.port < 0 THEN config.port := GemConfig.DefaultPort END;
   IF config.deadline < 0 THEN config.deadline := GemConfig.DefaultDeadline END;
   IF config.connections < 0 THEN config.connections := GemServer.DefaultLimit END;
-  IF (config.user = "") & GemUser.Root() THEN
+  IF (config.user = "") & UnixUsers.Root() THEN
     Fail("", "started as root: give -user, a user to serve files as (-user root to stay root)")
   END;
   IF (certdir = "") & ~GemCert.DefaultDir(certdir) THEN certdir := "" END;
@@ -233,7 +234,7 @@ BEGIN
   s := GemServer.New(Context(), Respond);
   s.SetDeadline(config.deadline); s.SetLimit(config.connections);
   IF ~s.Listen(config.listen, SHORT(config.port), err) THEN Fail("listen", err.text) END;
-  IF (config.user # "") & ~GemUser.Become(config.user, why) THEN Fail(config.user, why) END;
+  IF (config.user # "") & ~UnixUsers.Become(config.user, uerr) THEN Fail("", uerr.text) END;
   port := s.port;
   Out.String("port "); Out.Int(s.port, 0); Out.Ln;
   s.Serve(count)

@@ -15,7 +15,7 @@ MODULE TestRun; (* Running the server: stopping, its limit, its log, its user *)
    - -user: not root, the user it is serves, root and an unknown user
      stop it; as root, it refuses to start without -user. *)
 
-IMPORT Out, Platform, Tasks, Sockets, SocketTasks, Check, Child, GemClient, GemUser;
+IMPORT Out, Platform, Tasks, Sockets, SocketTasks, Check, Child, GemClient, UnixUsers;
 
 CONST
   Certs = "../build/certs/";
@@ -202,7 +202,7 @@ BEGIN
     Check.Check(Child.Wait(server, log, n) = 0, "  ... and the server exits 0")
   END;
 
-  IF GemUser.Root() THEN
+  IF UnixUsers.Root() THEN
     status := Run("exec ../build/pogemini -port 0 -n 1 -cert ../build/certs/self-ec.crt -key ../build/certs/self-ec.key");
     Check.Check((status = 1) & Check.Contains(got, "started as root: give -user"),
       "as root without -user: refuses to start");
@@ -210,7 +210,7 @@ BEGIN
   ELSE
     Check.Skip("as root without -user: refuses to start");
     status := Run("exec ../build/pogemini -port 0 -n 1 -user root -cert ../build/certs/self-ec.crt -key ../build/certs/self-ec.key");
-    Check.Check((status = 1) & Check.Contains(got, "pogemini: root: only root can become another user"),
+    Check.Check((status = 1) & Check.Contains(got, "pogemini: become root: only root can become another user"),
       "-user root, not root: refused");
     IF (status # 1) THEN Out.String(got) END;
     args := "-n 1 -user $(id -un)";
@@ -221,7 +221,7 @@ BEGIN
     END
   END;
   status := Run("exec ../build/pogemini -port 0 -n 1 -user no-such-user-pogemini -cert ../build/certs/self-ec.crt -key ../build/certs/self-ec.key");
-  Check.Check((status = 1) & Check.Contains(got, "pogemini: no-such-user-pogemini: no such user"),
+  Check.Check((status = 1) & Check.Contains(got, "pogemini: become no-such-user-pogemini: no such user"),
     "-user, an unknown user: refused");
   Check.Summary
 END Main;

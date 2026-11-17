@@ -19,11 +19,11 @@ MODULE GemAccess; (* Paths that need a client certificate *)
    links are resolved, so a link can't lead into a require from outside
    it. A hard link can: whoever makes one could copy the file as well. *)
 
-IMPORT Platform, GemServer, GemConfig;
+IMPORT Instants, Clocks, GemServer, GemConfig;
 
 (* Whether x may have path, in capsule k; if not, x has its header. *)
 PROCEDURE Allowed*(x: GemServer.Exchange; k: GemConfig.Capsule; path: ARRAY OF CHAR): BOOLEAN;
-  VAR i, j: INTEGER; a: GemConfig.Area; sec, usec: LONGINT; now: HUGEINT;
+  VAR i, j: INTEGER; a: GemConfig.Area; t: Instants.Instant; now: HUGEINT;
 BEGIN
   FOR i := 0 TO k.nAreas - 1 DO
     a := k.areas[i];
@@ -31,7 +31,7 @@ BEGIN
       IF x.certHash = NIL THEN
         IF x.Header(60, "client certificate required") THEN END; RETURN FALSE
       END;
-      Platform.GetTimeOfDay(sec, usec); now := sec;
+      Clocks.Now(t); now := Instants.UnixSeconds(t);
       IF (x.notBefore < 0) OR (now < x.notBefore) OR (now > x.notAfter) THEN
         IF x.Header(62, "certificate not valid") THEN END; RETURN FALSE
       END;

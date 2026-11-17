@@ -24,13 +24,12 @@ openssl s_client, OpenBSD's nc, gemget and gnutls-cli as clients); and
 self-signed certificate for a capsule given none (`TestConfig` on its
 own, `TestCapsules` through the server: SNI and hosts picking capsules,
 a made certificate reused, and what stops the server); and
-`src/GemFiles` (with its C part, `src/GemFiles.c`) serves the files
+`src/GemFiles` serves the files
 under a capsule's root (`TestFiles`: MIME types, directories and
 redirects, links in and out of the root, hidden names, a FIFO, a large
 file); and `src/GemAccess` refuses paths inside a capsule's requires
 without a fit client certificate, 60, 61 or 62 (`TestCerts`, with the
-tests' client certificates); and running it (`src/GemServer.c`,
-`src/GemUser`): the time in the log, a clean stop on SIGTERM or
+tests' client certificates); and running it: the time in the log, a clean stop on SIGTERM or
 SIGINT, a limit on connections at once, `-user`, and a systemd unit in
 `contrib/` (`TestRun`); and `gmake test` passes on FreeBSD, NetBSD and
 OpenBSD, amd64 and i386 ("Testing on the BSD hosts"); and the
@@ -44,21 +43,25 @@ hosts (PLAN.md, "rc scripts for the BSDs"). Since 2026-11-16 the
 signals are caught by poc's `StopRequests` and the log's time is
 poDateTime's, and `src/GemServer.c` is gone (PLAN.md, "StopRequests
 and poDateTime": Peaseblossom's "Ongoing library enhancements" 7,
-step 3).
+step 3). Since then pogemini has no C of its own: running as another
+user, resolving and opening files, and running `openssl` come from
+pounix, and `GemAccess`'s time from poDateTime (PLAN.md, "pounix":
+Peaseblossom's step 4).
 
-**poc 0.14.0 or later** (`StopRequests`), **and polibtls, posockets
-and poDateTime built by the same poc.** A poc library works only with
-the poc that built it. All three were installed in `~/.local/lib/poc`
-with 0.14.0 on 2026-11-16 (polibtls at cfb12e0, posockets at 08b6e48,
-poDateTime at 5ae9a47), each from a `git archive` of its commit by
-`make install`. After a poc upgrade, reinstall all three the same way,
-poDateTime first, since the other two need it; `make deps` says
-whether they match.
+**poc 0.14.0 or later** (`StopRequests`), **and pounix, polibtls,
+posockets and poDateTime built by the same poc.** A poc library works
+only with the poc that built it. All four were installed in
+`~/.local/lib/poc` with 0.14.0 on 2026-11-16 (pounix at 330d187,
+polibtls at cfb12e0, posockets at 08b6e48, poDateTime at 5ae9a47),
+each from a `git archive` of its commit by `make install`. After a poc
+upgrade, reinstall them the same way, poDateTime before polibtls and
+posockets, since they need it; `make deps` says whether they match.
 
 ## Reference material
 
 | What | Where |
 |---|---|
+| pounix | `~/Repos/Oberon/pounix`: `doc/UnixUsers.md`, `doc/UnixFiles.md`, `doc/UnixProcesses.md` |
 | polibtls | `~/Repos/Oberon/polibtls`: README.md (the user's guide), `doc/Tls.md`, `doc/TlsTasks.md` |
 | posockets | `~/Repos/Oberon/posockets`: its README and `doc/` |
 | poDateTime | `~/Repos/Oberon/poDateTime`: `Clocks.Now`, `TimeStrings.Instant` (the log's time) |
@@ -113,8 +116,8 @@ responses grow as they come, up to 16 MiB.
 
 As polibtls's AGENTS.md says, and the same hosts (not rackhir without
 asking). Copy the working tree there (`tar` less `build/` and `.git`)
-into a directory under `~/tmp`, with poDateTime, posockets and
-polibtls from `git archive`s, each installed, in that order, by
+into a directory under `~/tmp`, with pounix, poDateTime, posockets
+and polibtls from `git archive`s, each installed, in that order, by
 `gmake install POCLIBDIR=<dir>` there and
 used by `gmake test POCLIBDIR=<dir>`; remove it all when done. Judge a
 run by make's exit status, and count `assertion failed` and core files
@@ -143,7 +146,8 @@ As polibtls's, in short:
   (`/tmp` is a RAM disk here), removed when done.
 - **Portable to the BSDs** (PLAN.md, "Portability"): nothing
   Linux-only (`/proc`, `accept4`, `epoll`, GNU options of commands,
-  Linux paths); differences between systems go in a module's C part.
+  Linux paths); what needs C goes in a shared library (pounix,
+  posockets, poDateTime), not in pogemini.
   Testing on the BSD hosts follows posockets' AGENTS.md, "Testing on
   the BSD hosts", and polibtls's (Phase 7).
 - **Secrets**: never print, log or commit a key; test certificates are

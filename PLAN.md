@@ -638,6 +638,48 @@ server needs is written, and tested on every host, once.
   posockets and polibtls installed in the run's own directory, and
   TestRun passed three more times on each, with no core files.
 
+### pounix [done]
+
+Peaseblossom's PLAN.md, "Ongoing library enhancements" 7, step 4, and
+"pounix's first contents" (2026-11-16): pogemini keeps no C of its own.
+What a Unix program needs beyond poc's runtime is in pounix
+(`~/Repos/Oberon/pounix`), written and tested on every host once, and
+what is pogemini's policy stays here, in Oberon.
+
+- **`src/GemUser` is gone**: `UnixUsers.Root` and `Become`. The refusal
+  now reads `pogemini: become <user>: no such user` (or `only root can
+  become another user`), pounix's text, where it said `pogemini:
+  <user>: ...`; TestRun checks the new one.
+- **`src/GemFiles.c` is gone.** `GemFiles` resolves and opens a file
+  through `UnixFiles` (`Resolve`, `OpenRead` with `nonBlocking` and
+  `noFollow`, `KindOf`, `Read`, `Close`), and its policy, unchanged, is
+  now Oberon: the file must lie under the root once resolved; no name
+  after the root may begin with "."; `ENOENT`, `ENOTDIR`,
+  `ENAMETOOLONG`, `EACCES`, `ELOOP` and `EPERM` are "not found" (51)
+  and anything else a failure (40); a FIFO, device or socket is not
+  found. The order is the same: resolve, check, open the resolved path
+  without following a final link.
+- **`GemCert` runs `/bin/sh` through `UnixProcesses`**, not
+  `Platform.System`, with a fixed script and the directory, name and
+  subject alternative names as `$1` to `$3`, so nothing is quoted and a
+  directory with `'` in its name, refused before, now works (checked:
+  `it's a dir`). sh by its full path, as `system(3)` does, so a PATH
+  without openssl still gives 127 (TestCapsules). Its standard input is
+  `/dev/null`.
+- **`GemAccess`'s time** is `Clocks.Now` and `Instants.UnixSeconds`,
+  not `Platform.GetTimeOfDay`.
+- **pounix is a dependency** (`DEPLIBS`). `Platform.getEnv` and
+  `IdentifyByName` stay, as Peaseblossom's plan says.
+- `make test` passed on Linux, 299 checks, as before (the root-only one
+  skipped). With the check that a resolved path lies under the root
+  taken out, TestFiles' three links leading out are served; with the
+  hidden-name check out, its link to a hidden file is.
+- `gmake test` passed on alerik, artos, yishana, jherek and cymoril
+  (296 to 298 checks, as before; the skips only for clients a host
+  lacks and for root), with pounix, poDateTime, posockets and polibtls
+  installed in the run's own directory, and TestRun passed three more
+  times on each, with no core files.
+
 ## Open questions
 
 - ~~The configuration format: a small line-based file of our own, YAML

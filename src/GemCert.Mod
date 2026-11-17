@@ -19,11 +19,17 @@ MODULE GemCert; (* A self-signed certificate for a capsule given none *)
    exists: a .key alone is what an interrupted run left, and is made
    again. A .crt alone is refused, never replaced. *)
 
-IMPORT Platform, Strings, GemConfig;
+IMPORT Platform, Strings, UnixErrors, UnixProcesses, GemConfig;
 
 CONST
-  CmdLen = 16384;
-  NotFound = 127;   (* the shell's status for a missing command *)
+  NotFound = 127;   (* the script's status for a missing openssl *)
+
+  (* What makes the pair, run by /bin/sh with the directory, the
+     capsule's name and its subject alternative names as $1, $2 and $3,
+     so none of them is ever read as shell syntax. sh by its full path,
+     as system(3) does, so it is found whatever PATH is; openssl by
+     PATH. *)
+  Script = 'command -v openssl >/dev/null 2>&1 || exit 127; umask 077 && mkdir -p "$1" && cd "$1" && printf "[req]\ndistinguished_name = dn\n[dn]\n[x]\nbasicConstraints = critical,CA:FALSE\nsubjectAltName = %s\n" "$3" > "$2.cnf.tmp" && openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -pkeyopt ec_param_enc:named_curve -out "$2.key.tmp" 2>/dev/null && openssl req -config "$2.cnf.tmp" -new -x509 -sha256 -days 3650 -extensions x -subj "/CN=$2" -key "$2.key.tmp" -out "$2.crt.tmp" && chmod 644 "$2.crt.tmp" && mv -f "$2.key.tmp" "$2.key" && mv -f "$2.crt.tmp" "$2.crt"; s=$?; rm -f "$2.cnf.tmp" "$2.key.tmp" "$2.crt.tmp"; exit $s';
 
 (* The directory certificates are kept in by default:
    $XDG_DATA_HOME/pogemini/certs, or $HOME/.local/share/pogemini/certs.
@@ -44,12 +50,6 @@ BEGIN
   RETURN Platform.IdentifyByName(name, id) = 0
 END Exists;
 
-(* s appended to cmd in single quotes; s has none (Ensure checks). *)
-PROCEDURE Quoted(s: ARRAY OF CHAR; VAR cmd: ARRAY OF CHAR);
-BEGIN
-  Strings.Append("'", cmd); Strings.Append(s, cmd); Strings.Append("'", cmd)
-END Quoted;
-
 (* A file in dir: dir/name ext, in path. *)
 PROCEDURE Join(dir, name, ext: ARRAY OF CHAR; VAR path: ARRAY OF CHAR);
 BEGIN
@@ -68,14 +68,11 @@ END AppendSan;
    there is none, a new one. k must have a name, and neither cert nor
    key. FALSE, with why, if the pair can't be had. *)
 PROCEDURE Ensure*(dir: ARRAY OF CHAR; k: GemConfig.Capsule; VAR why: ARRAY OF CHAR): BOOLEAN;
-  VAR crt, key: GemConfig.Path; san: ARRAY 5000 OF CHAR; cmd: ARRAY CmdLen OF CHAR;
-    i, status: INTEGER;
+  VAR crt, key: GemConfig.Path; san: ARRAY 5000 OF CHAR; i: INTEGER;
+    cmd: UnixProcesses.Command; p: UnixProcesses.Process; err: UnixErrors.Error;
 BEGIN
   ASSERT((k.name # "") & (k.cert = "") & (k.key = ""), 105);
   IF dir = "" THEN COPY("no directory for certificates", why); RETURN FALSE END;
-  IF Strings.Pos("'", dir, 0) >= 0 THEN
-    COPY("a certificate directory with ' in its name", why); RETURN FALSE
-  END;
   IF Strings.Length(dir) + Strings.Length(k.name) + 8 >= GemConfig.PathLen THEN
     COPY("the certificate directory's name is too long", why); RETURN FALSE
   END;
@@ -89,30 +86,18 @@ BEGIN
 
   san := ""; AppendSan(k.name, san);
   FOR i := 0 TO k.nAliases - 1 DO AppendSan(k.aliases[i], san) END;
-  cmd := "command -v openssl >/dev/null 2>&1 || exit 127; umask 077 && mkdir -p ";
-  Quoted(dir, cmd); Strings.Append(" && cd ", cmd); Quoted(dir, cmd);
-  Strings.Append(" && printf '[req]\ndistinguished_name = dn\n[dn]\n[x]\nbasicConstraints = critical,CA:FALSE\nsubjectAltName = ", cmd);
-  Strings.Append(san, cmd); Strings.Append("\n' > ", cmd); Quoted(k.name, cmd); Strings.Append(".cnf.tmp", cmd);
-  Strings.Append(" && openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -pkeyopt ec_param_enc:named_curve -out ", cmd);
-  Quoted(k.name, cmd); Strings.Append(".key.tmp 2>/dev/null", cmd);
-  Strings.Append(" && openssl req -config ", cmd); Quoted(k.name, cmd);
-  Strings.Append(".cnf.tmp -new -x509 -sha256 -days 3650 -extensions x -subj /CN=", cmd);
-  Quoted(k.name, cmd); Strings.Append(" -key ", cmd); Quoted(k.name, cmd);
-  Strings.Append(".key.tmp -out ", cmd); Quoted(k.name, cmd);
-  Strings.Append(".crt.tmp && chmod 644 ", cmd); Quoted(k.name, cmd);
-  Strings.Append(".crt.tmp && mv -f ", cmd); Quoted(k.name, cmd); Strings.Append(".key.tmp ", cmd);
-  Quoted(k.name, cmd); Strings.Append(".key && mv -f ", cmd); Quoted(k.name, cmd);
-  Strings.Append(".crt.tmp ", cmd); Quoted(k.name, cmd);
-  Strings.Append(".crt; s=$?; rm -f ", cmd); Quoted(k.name, cmd); Strings.Append(".cnf.tmp ", cmd);
-  Quoted(k.name, cmd); Strings.Append(".key.tmp ", cmd); Quoted(k.name, cmd);
-  Strings.Append(".crt.tmp; exit $s", cmd);
-  IF Strings.Length(cmd) >= CmdLen - 1 THEN COPY("too many names for a certificate", why); RETURN FALSE END;
-
-  status := Platform.System(cmd);
-  IF status = NotFound * 256 THEN
+  IF Strings.Length(san) >= LEN(san) - 1 THEN COPY("too many names for a certificate", why); RETURN FALSE END;
+  cmd := UnixProcesses.NewCommand("/bin/sh");
+  UnixProcesses.Add(cmd, "-c"); UnixProcesses.Add(cmd, Script);
+  UnixProcesses.Add(cmd, "sh");  (* $0 *)
+  UnixProcesses.Add(cmd, dir); UnixProcesses.Add(cmd, k.name); UnixProcesses.Add(cmd, san);
+  UnixProcesses.SetInput(cmd, UnixProcesses.null);
+  IF ~UnixProcesses.Start(cmd, p, err) OR ~UnixProcesses.Wait(p, err) THEN
+    COPY(err.text, why); RETURN FALSE
+  ELSIF p.exited & (p.status = NotFound) THEN
     COPY("no certificate or key given, and openssl, which would make them, isn't on PATH", why);
     RETURN FALSE
-  ELSIF (status # 0) OR ~Exists(crt) OR ~Exists(key) THEN
+  ELSIF ~p.exited OR (p.status # 0) OR ~Exists(crt) OR ~Exists(key) THEN
     COPY("openssl failed to make a certificate in ", why); Strings.Append(dir, why); RETURN FALSE
   END;
   COPY(crt, k.cert); COPY(key, k.key);

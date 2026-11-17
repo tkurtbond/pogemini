@@ -41,23 +41,15 @@ MODULE GemFiles; (* A capsule's files, served *)
    through, what was sent is all the client gets, ended as if complete:
    Gemini has no way to say otherwise. *)
 
-IMPORT SYSTEM, Strings, GemServer, GemRequest, GemConfig, GemAccess;
+IMPORT Strings, UnixErrors, UnixFiles, GemServer, GemRequest, GemConfig, GemAccess;
 
 CONST
   Piece* = 16384;  (* bytes read and sent at a time *)
   Index* = "index.gmi";
   PathLen = 2200;  (* a root, a request's path and Index *)
 
-  (* GemFiles.c's kinds *)
+  (* What Open finds *)
   File = 0; Missing = 1; Directory = 2; Failed = 3;
-
-PROCEDURE ["C", "GemFiles.-resolve"] CResolve(path: ARRAY OF CHAR;
-  VAR out: ARRAY OF CHAR; max: SYSTEM.INT64): SYSTEM.INT32;
-PROCEDURE ["C", "GemFiles.-open"] COpen(root, path: ARRAY OF CHAR;
-  VAR kind: SYSTEM.INT32; VAR real: ARRAY OF CHAR; max: SYSTEM.INT64): SYSTEM.INT32;
-PROCEDURE ["C", "GemFiles.-read"] CRead(fd: SYSTEM.INT32; VAR buf: ARRAY OF CHAR;
-  pos, len: SYSTEM.INT64): SYSTEM.INT64;
-PROCEDURE ["C", "GemFiles.-close"] CClose(fd: SYSTEM.INT32);
 
 TYPE
   Buffer = POINTER TO ARRAY Piece OF CHAR;
@@ -65,8 +57,9 @@ TYPE
 (* path with every symbolic link, "." and ".." resolved, in real: FALSE
    if it can't be, or is too long for real. *)
 PROCEDURE Resolve*(path: ARRAY OF CHAR; VAR real: ARRAY OF CHAR): BOOLEAN;
+  VAR err: UnixErrors.Error;
 BEGIN
-  RETURN CResolve(path, real, LEN(real)) = 0
+  RETURN UnixFiles.Resolve(path, real, err)
 END Resolve;
 
 PROCEDURE Lower(c: CHAR): CHAR;
@@ -131,28 +124,86 @@ BEGIN
   RETURN FALSE
 END Hidden;
 
+(* Whether err, from resolving or opening a file, means only that there
+   is no such file to serve: none, or none the server may read. *)
+PROCEDURE NotThere(VAR err: UnixErrors.Error): BOOLEAN;
+  VAR c: INTEGER;
+BEGIN
+  c := err.code;
+  RETURN (c = UnixErrors.ENOENT) OR (c = UnixErrors.ENOTDIR)
+    OR (c = UnixErrors.ENAMETOOLONG) OR (c = UnixErrors.EACCES)
+    OR (c = UnixErrors.ELOOP) OR (c = UnixErrors.EPERM)
+END NotThere;
+
+(* path, resolved, in real, and opened for reading: its descriptor, with
+   kind File, if it is a regular file; otherwise -1, and kind Directory
+   for a directory, Missing for nothing that may be served (none,
+   outside root, a name under root beginning with ".", not readable,
+   not a regular file), Failed for anything else (too many files open,
+   an I/O error). real is "" for anything but a file or a directory.
+
+   root is a resolved path (Resolve). The file is opened by its
+   resolved path, non-blocking, so a FIFO doesn't stop the server in
+   open, and without following a final link, in case the last name
+   became one since it was resolved. *)
+PROCEDURE OpenResolved(root, path: ARRAY OF CHAR; VAR kind: INTEGER;
+    VAR real: ARRAY OF CHAR): LONGINT;
+  VAR err: UnixErrors.Error; n, i, fd: LONGINT; k: INTEGER;
+BEGIN
+  IF ~UnixFiles.Resolve(path, real, err) THEN
+    IF NotThere(err) THEN kind := Missing ELSE kind := Failed END;
+    real[0] := 0X; RETURN -1
+  END;
+  (* under root: root itself, or root and "/" before the rest; root "/"
+     is a prefix of everything *)
+  IF root = "/" THEN n := 0
+  ELSE
+    n := 0; WHILE (root[n] # 0X) & (real[n] = root[n]) DO INC(n) END;
+    IF (root[n] # 0X) OR (real[n] # "/") & (real[n] # 0X) THEN
+      kind := Missing; real[0] := 0X; RETURN -1
+    END
+  END;
+  (* a hidden name after the root, asked for or reached through a link *)
+  i := n;
+  WHILE real[i] # 0X DO
+    IF (real[i] = "/") & (real[i + 1] = ".") THEN kind := Missing; real[0] := 0X; RETURN -1 END;
+    INC(i)
+  END;
+  IF ~UnixFiles.OpenRead(real, {UnixFiles.nonBlocking, UnixFiles.noFollow}, fd, err) THEN
+    IF NotThere(err) THEN kind := Missing ELSE kind := Failed END;
+    real[0] := 0X; RETURN -1
+  END;
+  IF ~UnixFiles.KindOf(fd, k, err) THEN
+    UnixFiles.Close(fd); kind := Failed; real[0] := 0X; RETURN -1
+  END;
+  IF k = UnixFiles.regular THEN kind := File; RETURN fd END;
+  UnixFiles.Close(fd);
+  IF k = UnixFiles.directory THEN kind := Directory ELSE kind := Missing; real[0] := 0X END;
+  RETURN -1
+END OpenResolved;
+
 (* Sends the regular file open on fd, of type, and closes fd. *)
-PROCEDURE Send(x: GemServer.Exchange; fd: SYSTEM.INT32; type: ARRAY OF CHAR);
-  VAR buf: Buffer; n: SYSTEM.INT64;
+PROCEDURE Send(x: GemServer.Exchange; fd: LONGINT; type: ARRAY OF CHAR);
+  VAR buf: Buffer; n: LONGINT; err: UnixErrors.Error;
 BEGIN
   IF x.Header(20, type) THEN
     NEW(buf);
     LOOP
-      n := CRead(fd, buf^, 0, Piece);
-      IF (n <= 0) OR ~x.Write(buf^, 0, SYSTEM.VAL(LONGINT, n)) THEN EXIT END
+      IF ~UnixFiles.Read(fd, buf^, 0, Piece, n, err) OR (n = 0)
+        OR ~x.Write(buf^, 0, n) THEN EXIT END
     END
   END;
-  CClose(fd)
+  UnixFiles.Close(fd)
 END Send;
 
-(* Opens path, under root, as COpen, and, for a file or a directory,
+(* Opens path, under root, as OpenResolved, and, for a file or a directory,
    checks that x may have it, by the path it really has: if not, x has
    its header, and the result is -1 and kind Missing. *)
 PROCEDURE Open(x: GemServer.Exchange; k: GemConfig.Capsule; path: ARRAY OF CHAR;
-    VAR kind: SYSTEM.INT32): SYSTEM.INT32;
-  VAR real, rel: ARRAY PathLen OF CHAR; fd: SYSTEM.INT32; i, n: LONGINT;
+    VAR kind: INTEGER): LONGINT;
+  VAR real, rel: ARRAY PathLen OF CHAR; fd, i, n: LONGINT;
 BEGIN
-  fd := COpen(k.root, path, kind, real, LEN(real));
+  fd := OpenResolved(k.root, path, kind, real);
   IF (kind = File) OR (kind = Directory) THEN
     (* its path under the root: the root "/" is a prefix of none *)
     IF k.root = "/" THEN n := 0 ELSE n := Strings.Length(k.root) END;
@@ -160,7 +211,7 @@ BEGIN
     rel[i] := 0X;
     IF rel = "" THEN rel := "/" END;
     IF ~GemAccess.Allowed(x, k, rel) THEN
-      IF kind = File THEN CClose(fd) END;
+      IF kind = File THEN UnixFiles.Close(fd) END;
       kind := Missing; fd := -1
     END
   END;
@@ -172,7 +223,7 @@ END Open;
 PROCEDURE Serve*(x: GemServer.Exchange; k: GemConfig.Capsule; VAR r: GemRequest.Request);
   VAR path: ARRAY PathLen OF CHAR; type: ARRAY 64 OF CHAR;
     meta: ARRAY GemServer.MaxMeta + 1 OF CHAR;
-    kind, fd: SYSTEM.INT32; n: LONGINT;
+    kind: INTEGER; fd, n: LONGINT;
 BEGIN
   IF Hidden(r.path) OR (Strings.Length(k.root) + Strings.Length(r.path) + 16 >= PathLen) THEN
     IF x.Header(51, "not found") THEN END; RETURN

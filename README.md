@@ -41,12 +41,13 @@ setting. [PLAN.md](PLAN.md) has the design and the roadmap, and
 - clang, which poc runs, and GNU make (`gmake` on the BSDs).
 - libtls: Fedora's `libretls` and `libretls-devel`, the `libretls`
   package on FreeBSD and NetBSD; OpenBSD's is in base.
-- polibtls, posockets and
-  [poDateTime](https://github.com/tkurtbond/poDateTime), installed by
+- [pounix](https://github.com/tkurtbond/pounix), polibtls, posockets
+  and [poDateTime](https://github.com/tkurtbond/poDateTime), installed by
   `make install` in each, in `~/.local/lib/poc` by default (`make
   POCLIBDIR=<dir>` otherwise), and built by the same poc as this: poc
   refuses a library another poc built. After upgrading poc, reinstall
-  all three, poDateTime first, then rebuild this.
+  all four, poDateTime before polibtls and posockets, then rebuild
+  this.
 - `openssl` (OpenSSL's or LibreSSL's) at run time, to make self-signed
   certificates: only for a capsule given no certificate.
 
