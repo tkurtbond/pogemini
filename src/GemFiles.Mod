@@ -81,7 +81,7 @@ BEGIN
     j := 0; WHILE i < n DO ext[j] := Lower(name[i]); INC(i); INC(j) END; ext[j] := 0X
   END;
   IF (ext = "gmi") OR (ext = "gemini") THEN COPY("text/gemini", type)
-  ELSIF ext = "txt" THEN COPY("text/plain", type)
+  ELSIF (ext = "txt") OR (ext = "text") THEN COPY("text/plain", type)
   ELSIF (ext = "md") OR (ext = "markdown") THEN COPY("text/markdown", type)
   ELSIF (ext = "html") OR (ext = "htm") THEN COPY("text/html", type)
   ELSIF ext = "css" THEN COPY("text/css", type)

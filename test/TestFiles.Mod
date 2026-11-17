@@ -28,7 +28,7 @@ CONST
   StackSize = 1024 * 1024;  (* see TestServe *)
   CR = 0DX; LF = 0AX;
   BigLen = 1048576 + 1234;  (* not a multiple of a piece *)
-  Ours = 30;   (* the connections Test makes, besides locked.gmi *)
+  Ours = 31;   (* the connections Test makes, besides locked.gmi *)
 
 TYPE
   Text = ARRAY 2048 OF CHAR;
@@ -168,6 +168,7 @@ BEGIN
     Expect("/b.gemini", "20 text/gemini", "", "a .gemini file: text/gemini");
     Expect("/C.GMI", "20 text/gemini", "", "  ... in capitals");
     Expect("/sub/a.txt", "20 text/plain", "plain|", "a .txt file in a directory: text/plain, its text");
+    Expect("/t.text", "20 text/plain", "text|", "a .text file: text/plain");
     Expect("/p.png", "20 image/png", "", "a .png file: image/png");
     Expect("/s.html", "20 text/html", "", "a .html file: text/html");
     Expect("/noext", "20 application/octet-stream", "", "no extension: application/octet-stream");
@@ -249,7 +250,7 @@ BEGIN
   IF status # 0 THEN Check.Check(FALSE, "make ../build/test-files"); Check.Summary; RETURN END;
   Write("root/index.gmi", "# files|=> sub/|");
   Write("root/a.gmi", "a|"); Write("root/b.gemini", "b|"); Write("root/C.GMI", "c|");
-  Write("root/sub/a.txt", "plain|"); Write("root/p.png", "png"); Write("root/s.html", "<p>");
+  Write("root/sub/a.txt", "plain|"); Write("root/t.text", "text|"); Write("root/p.png", "png"); Write("root/s.html", "<p>");
   Write("root/noext", "?"); Write("root/x.frob", "?");
   Write("root/a b.gmi", "space|"); Write("root/été.gmi", "summer|");
   WriteBig("root/big.bin");
