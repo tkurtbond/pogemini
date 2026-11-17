@@ -40,14 +40,20 @@ example configuration, which `TestConfig` reads), and `make install`,
 checked on Linux and all five BSD hosts. Every phase of PLAN.md's
 roadmap is done. Since then, rc scripts for the BSDs,
 `contrib/{freebsd,netbsd,openbsd}/pogemini`, checked as root on all five
-hosts (PLAN.md, "rc scripts for the BSDs").
+hosts (PLAN.md, "rc scripts for the BSDs"). Since 2026-11-16 the
+signals are caught by poc's `StopRequests` and the log's time is
+poDateTime's, and `src/GemServer.c` is gone (PLAN.md, "StopRequests
+and poDateTime": Peaseblossom's "Ongoing library enhancements" 7,
+step 3).
 
-**poc 0.13.0 or later, and polibtls and posockets built by the same
-poc.** A poc library works only with the poc that built it. Both were
-installed in `~/.local/lib/poc` on 2026-11-16 (polibtls at b828a53,
-posockets at 059b47d), each from a `git archive` of its commit by
-`make install`. After a poc upgrade, reinstall both the same way;
-`make deps` says whether they match.
+**poc 0.14.0 or later** (`StopRequests`), **and polibtls, posockets
+and poDateTime built by the same poc.** A poc library works only with
+the poc that built it. All three were installed in `~/.local/lib/poc`
+with 0.14.0 on 2026-11-16 (polibtls at cfb12e0, posockets at 08b6e48,
+poDateTime at 5ae9a47), each from a `git archive` of its commit by
+`make install`. After a poc upgrade, reinstall all three the same way,
+poDateTime first, since the other two need it; `make deps` says
+whether they match.
 
 ## Reference material
 
@@ -55,7 +61,8 @@ posockets at 059b47d), each from a `git archive` of its commit by
 |---|---|
 | polibtls | `~/Repos/Oberon/polibtls`: README.md (the user's guide), `doc/Tls.md`, `doc/TlsTasks.md` |
 | posockets | `~/Repos/Oberon/posockets`: its README and `doc/` |
-| poc | `/usr/bin/poc` (0.13.0); its source `~/Repos/Oberon/Peaseblossom` (`doc/users-guide.md`, `doc/reference-guide.md`; `rtl/llvm/Tasks.Mod`) |
+| poDateTime | `~/Repos/Oberon/poDateTime`: `Clocks.Now`, `TimeStrings.Instant` (the log's time) |
+| poc | `/usr/bin/poc` (0.14.0 since 2026-11-16); its source `~/Repos/Oberon/Peaseblossom` (`doc/users-guide.md`, `doc/reference-guide.md`; `rtl/llvm/Tasks.Mod`, `rtl/llvm/StopRequests.Mod`) |
 | Oberon-2 report | `~/Reference/Computer/Languages/Oberon/Oberon2.pdf` |
 | Gemini protocol | `gemini://geminiprotocol.net/docs/protocol-specification.gmi` (https mirror: https://geminiprotocol.net/docs/protocol-specification.gmi) |
 | Clients to test against | `openssl s_client`; OpenBSD's `nc` as `/usr/bin/netcat`; gemget (`~/go/bin/gemget`); `gnutls-cli`. polibtls's `test/TestGemini.Mod` shows how to drive each |
@@ -106,8 +113,9 @@ responses grow as they come, up to 16 MiB.
 
 As polibtls's AGENTS.md says, and the same hosts (not rackhir without
 asking). Copy the working tree there (`tar` less `build/` and `.git`)
-into a directory under `~/tmp`, with polibtls and posockets from `git
-archive`s, each installed by `gmake install POCLIBDIR=<dir>` there and
+into a directory under `~/tmp`, with poDateTime, posockets and
+polibtls from `git archive`s, each installed, in that order, by
+`gmake install POCLIBDIR=<dir>` there and
 used by `gmake test POCLIBDIR=<dir>`; remove it all when done. Judge a
 run by make's exit status, and count `assertion failed` and core files
 as well as `FAIL`. Run TestRun a few more times: its faults were races.
@@ -118,9 +126,12 @@ Found in Phase 7 (PLAN.md):
   than it seems: the first `gmtime_r` loads the UTC zone, needing more
   than 64 KiB of stack on NetBSD and 32 on OpenBSD, and overran a
   connection's task, corrupting the heap without touching the guard
-  page. So the log's time is worked out by arithmetic.
-- **Catch a signal before anyone can learn the port**: Listen installs
-  the handler, since a test sends SIGINT as soon as it reads `port`.
+  page. So the log's time is worked out by arithmetic, now by
+  poDateTime's `Clocks.Now` and `TimeStrings.Instant`, which need about
+  2 KiB of stack on every host.
+- **Catch a signal before anyone can learn the port**: Listen calls
+  `StopRequests.Catch`, since a test sends SIGINT as soon as it reads
+  `port`.
 
 ## Conventions
 

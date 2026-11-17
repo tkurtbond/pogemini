@@ -36,15 +36,17 @@ setting. [PLAN.md](PLAN.md) has the design and the roadmap, and
 
 ## Requirements
 
-- poc 0.13.0 or later, with its runtime library, on `PATH`; override
+- poc 0.14.0 or later, with its runtime library, on `PATH`; override
   with `make POC=/path/to/poc`.
 - clang, which poc runs, and GNU make (`gmake` on the BSDs).
 - libtls: Fedora's `libretls` and `libretls-devel`, the `libretls`
   package on FreeBSD and NetBSD; OpenBSD's is in base.
-- polibtls and posockets, installed by `make install` in each, in
-  `~/.local/lib/poc` by default (`make POCLIBDIR=<dir>` otherwise), and
-  built by the same poc as this: poc refuses a library another poc
-  built. After upgrading poc, reinstall both, then rebuild this.
+- polibtls, posockets and
+  [poDateTime](https://github.com/tkurtbond/poDateTime), installed by
+  `make install` in each, in `~/.local/lib/poc` by default (`make
+  POCLIBDIR=<dir>` otherwise), and built by the same poc as this: poc
+  refuses a library another poc built. After upgrading poc, reinstall
+  all three, poDateTime first, then rebuild this.
 - `openssl` (OpenSSL's or LibreSSL's) at run time, to make self-signed
   certificates: only for a capsule given no certificate.
 
@@ -125,7 +127,8 @@ Its log is standard output, one line per connection, each beginning
 with the time, UTC; mistakes in the configuration go to standard error,
 with exit status 1. SIGTERM or SIGINT stops it: new clients are refused
 at once, the connections in progress finish within their deadline (10
-s by default), and it exits 0. A second signal ends it at once.
+s by default), and it exits 0. A second signal of the same kind ends it
+at once.
 
 On Linux with systemd, `contrib/pogemini.service` starts it as the user
 `gemini`, logs to the journal, keeps self-signed certificates in

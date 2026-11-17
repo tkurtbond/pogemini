@@ -605,6 +605,39 @@ for the system it runs on (by `uname -s`) in `$(DOCDIR)/rc.d`, mode
   `uninstall` with each script. The same on the i386 hosts, yishana
   (NetBSD 11.0) and cymoril (OpenBSD 7.9), with the same results.
 
+### StopRequests and poDateTime [done]
+
+Peaseblossom's PLAN.md, "Ongoing library enhancements" 7, step 3
+(2026-11-16): pogemini, polibtls and posockets give up their own C for
+poc's `StopRequests` and poDateTime's clocks, so that what every
+server needs is written, and tested on every host, once.
+
+- **`src/GemServer.c` is gone.** `Listen` calls `StopRequests.Catch`
+  (still before the port is known), and the server stops when
+  `StopRequests.Latest()` is not `none`. Each kind is caught once, as
+  `SA_RESETHAND` did, and a system call it interrupts is restarted, as
+  with `SA_RESTART`, so the behaviour is unchanged. The log still says
+  `stopping on signal <n>`: `GemServer.Signal` gives 2 for an
+  interrupt and 15 for a termination, their numbers on Linux and the
+  BSDs. README.md and the manual page now say that a second signal *of
+  the same kind* ends it at once, which was already so.
+- **The log's time** is `Clocks.Now` and `TimeStrings.Instant(t, 0,
+  s)`: the same `2026-11-16T12:34:56Z`, worked out by poDateTime in
+  Oberon from `clock_gettime`, with no zone loaded (on Unix `Now`
+  takes the UTC path). Checked first, as Peaseblossom's plan asked: a
+  probe used the stack of a 16 KiB task in 256-byte frames until it
+  hit the guard page, with and without the stamp; the stamp cost 3
+  frames on artos, yishana, jherek and cymoril and 6 on alerik and
+  Linux, so at most about 2 KiB.
+- **poDateTime is a dependency** (`DEPLIBS`), and polibtls and
+  posockets now need it too. The least poc is 0.14.0.
+- `make test` passed on Linux (299 checks, the root-only one skipped).
+  With `StopRequests.Catch` taken out, six of TestRun's checks failed.
+  `gmake test` passed on all five BSD hosts (296 to 298 checks; the
+  skips only for clients a host lacks and for root), with poDateTime,
+  posockets and polibtls installed in the run's own directory, and
+  TestRun passed three more times on each, with no core files.
+
 ## Open questions
 
 - ~~The configuration format: a small line-based file of our own, YAML

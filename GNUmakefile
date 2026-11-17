@@ -42,7 +42,7 @@ BUILD := build
 POCVERSION := $(shell $(POC) -version | sed -n '1s/^poc \([^ ]*\).*/\1/p')
 TRIPLE := $(shell $(POC) -version | sed -n 's/^target \([^ ]*\).*/\1/p')
 # The installed libraries this needs.
-DEPLIBS := polibtls posockets
+DEPLIBS := polibtls posockets podatetime
 
 # Programs (src/<name>.Mod, each a main module).
 PROGS := pogemini

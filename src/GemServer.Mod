@@ -31,9 +31,14 @@ MODULE GemServer; (* Listeners, and a task per connection *)
      <time> stopping on signal <n>, connections in progress: <k>
      <time> stopped
 
-   A second signal ends it at once. *)
+   A second signal of the same kind ends it at once. The signals are
+   caught by poc's StopRequests, and the time is poDateTime's (Clocks,
+   TimeStrings), which works the date out itself: the C library's
+   gmtime_r loads the UTC zone first, which needs more stack than a
+   task has on NetBSD and OpenBSD. *)
 
-IMPORT SYSTEM, Out, Tasks, Sockets, SocketTasks, Tls, TlsTasks;
+IMPORT Out, Tasks, Instants, Clocks, TimeStrings, StopRequests, Sockets,
+  SocketTasks, Tls, TlsTasks;
 
 CONST
   MaxRequest* = 1024;  (* a request's URL at most, by the specification *)
@@ -51,10 +56,6 @@ CONST
   NoBody = 102;        (* Write: no 2x header first *)
   NoHeader = 103;      (* a Responder returned without a header *)
   NotListening = 104;  (* Serve before Listen *)
-
-PROCEDURE ["C", "GemServer.-catch"] CCatch;
-PROCEDURE ["C", "GemServer.-caught"] CCaught(): SYSTEM.INT32;
-PROCEDURE ["C", "GemServer.-now"] CNow(VAR out: ARRAY OF CHAR; max: SYSTEM.INT64);
 
 TYPE
   (* One connection's request, and its response so far. *)
@@ -106,8 +107,11 @@ END Length;
 
 (* Starts a line of the log: the time, UTC, and a space. *)
 PROCEDURE OutTime;
-  VAR t: ARRAY 32 OF CHAR;
-BEGIN CNow(t, LEN(t)); Out.String(t); Out.Char(" ")
+  VAR now: Instants.Instant; t: ARRAY 32 OF CHAR;
+BEGIN
+  (* whole seconds, as 2026-11-16T12:34:56Z *)
+  Clocks.Now(now); TimeStrings.Instant(now, 0, t);
+  Out.String(t); Out.Char(" ")
 END OutTime;
 
 (* Writes the response header, status and meta, "" for none. *)
@@ -228,11 +232,20 @@ BEGIN
   DEC(s.active); Tasks.Broadcast(s.ended)
 END Run;
 
-(* Whether a signal has asked the server to stop; it reads what the
-   handler wrote every time. *)
+(* Whether a signal has asked the server to stop; StopRequests reads
+   what its handler wrote every time. *)
 PROCEDURE Stopping(): BOOLEAN;
-BEGIN RETURN CCaught() # 0
+BEGIN RETURN StopRequests.Latest() # StopRequests.none
 END Stopping;
+
+(* The number of the signal that asked the server to stop, for the log:
+   SIGINT and SIGTERM are 2 and 15 on Linux and the BSDs alike. *)
+PROCEDURE Signal(): INTEGER;
+BEGIN
+  IF StopRequests.Latest() = StopRequests.interrupt THEN RETURN 2
+  ELSE RETURN 15
+  END
+END Signal;
 
 (* Drops from s.handlers those whose tasks are done, so that the list
    holds only those running, however long the server runs. *)
@@ -305,7 +318,7 @@ PROCEDURE (s: Server) Listen*(host: ARRAY OF CHAR; port: INTEGER;
     VAR err: Sockets.Error): BOOLEAN;
   VAR a: Sockets.Address;
 BEGIN
-  CCatch;
+  StopRequests.Catch;
   IF ~Sockets.Listen(host, port, 16, TRUE, s.listeners, s.n, err)
     OR ~Sockets.LocalAddress(s.listeners[0], a, err) THEN
     RETURN FALSE
@@ -333,7 +346,7 @@ BEGIN
   FOR i := 0 TO s.n - 1 DO Tasks.Join(as[i]) END;
   stopping := Stopping();
   IF stopping THEN
-    OutTime; Out.String("stopping on signal "); Out.Int(CCaught(), 0);
+    OutTime; Out.String("stopping on signal "); Out.Int(Signal(), 0);
     Out.String(", connections in progress: "); Out.Int(s.active, 0); Out.Ln
   END;
   WHILE s.handlers # NIL DO Tasks.Join(s.handlers); s.handlers := s.handlers.next END;
