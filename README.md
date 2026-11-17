@@ -19,8 +19,9 @@ What it does:
   one made for it the first time and kept;
 - checks each request, refusing what the specification forbids;
 - serves the files under a capsule's root: the MIME type by extension
-  (`text/gemini` for `.gmi`), a directory's `index.gmi`, never a hidden
-  name (`.git`) or anything outside the root, even by a symbolic link;
+  (`text/gemini` for `.gmi`), a directory's `index.gmi`, or, if asked
+  for, a listing of a directory without one, never a hidden name
+  (`.git`) or anything outside the root, even by a symbolic link;
 - requires a client certificate for parts of a capsule, any or only
   those listed (status 60, 61, and 62 for one outside its dates);
 - logs a line per connection, with the time, on standard output;
@@ -28,7 +29,7 @@ What it does:
   once, stops cleanly on SIGTERM, and, started as root, serves as
   another user.
 
-It serves only static files: no CGI, no proxying, no directory listings.
+It serves only static files: no CGI, no proxying.
 
 [`pogemini(1)`](doc/pogemini.1) is the reference: every option and
 setting. [PLAN.md](PLAN.md) has the design and the roadmap, and
@@ -107,6 +108,7 @@ configuration file, `pogemini -config /etc/pogemini.conf`:
 
     capsule example.net             # a self-signed certificate, made once
       root /srv/gemini/example.net
+      listings yes                  # list directories without index.gmi
 
 A capsule answers its name and its aliases; a request for any other
 host, or another port, is refused (53). An identity is a client

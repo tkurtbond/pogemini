@@ -19,7 +19,19 @@ MODULE TestFiles; (* A capsule's files, served *)
 
    Then openssl s_client, if it is on PATH ($OPENSSL), must get the
    large file whole too. And a capsule with no root answers "/" with
-   its page, and anything else 51. Each time, the server must exit 0. *)
+   its page, and anything else 51.
+
+   Then the same root with -listings (given last, the one option
+   without a value), and /list/ in it require'd in part: a directory
+   without index.gmi is listed, directories first, then by the bytes of
+   the names, each percent-encoded in its link, leaving out hidden
+   names (a link to a file served among them), links out of the root
+   or to a hidden name, a FIFO, a name
+   with a control character or not UTF-8, and the require the client
+   has no certificate for; an empty directory lists only "../", "/"
+   none; one with index.gmi still gets it; and one with more than
+   GemFiles.MaxEntries names lists that many and says so. -listings
+   without -root is refused. Each time, the server must exit 0. *)
 
 IMPORT Out, Files, Platform, Tasks, Check, Child, GemClient;
 
@@ -29,6 +41,8 @@ CONST
   CR = 0DX; LF = 0AX;
   BigLen = 1048576 + 1234;  (* not a multiple of a piece *)
   Ours = 31;   (* the connections Test makes, besides locked.gmi *)
+  Listed = 7;  (* and with listings *)
+  MaxEntries = 10000;  (* GemFiles.MaxEntries *)
 
 TYPE
   Text = ARRAY 2048 OF CHAR;
@@ -159,9 +173,43 @@ BEGIN
   END
 END ExpectBig;
 
+(* /many/ must list MaxEntries names, and say there are more. *)
+PROCEDURE ExpectMany(label: ARRAY OF CHAR);
+  VAR r: GemClient.Response; h: Text; b, i, links: LONGINT; ok: BOOLEAN;
+    last: ARRAY 64 OF CHAR;
+BEGIN
+  r := Fetch("/many/", label);
+  IF r # NIL THEN
+    Header(r, h, b);
+    links := 0; i := b;
+    WHILE i + 2 < r.len DO
+      IF (r.data[i] = "=") & (r.data[i + 1] = ">") & ((i = b) OR (r.data[i - 1] = LF)) THEN INC(links) END;
+      INC(i)
+    END;
+    i := r.len - 1; WHILE (i > b) & (r.data[i - 1] # LF) DO DEC(i) END;
+    b := 0; WHILE (i < r.len) & (r.data[i] # LF) & (b < LEN(last) - 1) DO last[b] := r.data[i]; INC(i); INC(b) END;
+    last[b] := 0X;
+    ok := (h = "20 text/gemini") & (links = MaxEntries + 1) & (last = "More entries are not listed.");
+    Check.Check(ok, label);
+    IF ~ok THEN Out.String("  header: "); Out.String(h); Out.String(", links ");
+      Out.Int(links, 0); Out.String(", last line "); Out.String(last); Out.Ln
+    END
+  END
+END ExpectMany;
+
 PROCEDURE (t: Test) Run*;
 BEGIN
-  IF t.run = 1 THEN
+  IF t.run = 3 THEN
+    Expect("/list/", "20 text/gemini",
+      "# /list/||=> ../ ../|=> adir/ adir/|=> dir2/ dir2/|=> Z.txt Z.txt|=> a%20b.gmi a b.gmi|=> a%3Ab a:b|=> b.gmi b.gmi|=> in.gmi in.gmi|=> %C3%A9t%C3%A9.gmi été.gmi|",
+      "a listing: directories first, by bytes, encoded, leaving out what isn't served");
+    Expect("/list/dir2/", "20 text/gemini", "# /list/dir2/||=> ../ ../|", "  ... an empty directory: only ../");
+    Expect("/list", "31 /list/", "", "  ... without /: 31 still");
+    Expect("/list/private/", "60 client certificate required", "", "  ... the require left out: 60 itself");
+    Expect("/", "20 text/gemini", "# files|=> sub/|", "  ... a directory with index.gmi: it");
+    Expect("/sub/", "20 text/gemini", "# /sub/||=> ../ ../|=> a.txt a.txt|", "  ... /sub/, 51 without listings");
+    ExpectMany("  ... more than MaxEntries: that many, and a line saying so")
+  ELSIF t.run = 1 THEN
     Expect("/", "20 text/gemini", "# files|=> sub/|", "/: its index.gmi");
     Expect("", "20 text/gemini", "# files|=> sub/|", "  ... and an empty path, without a redirect");
     Expect("/a.gmi", "20 text/gemini", "", "a .gmi file: text/gemini");
@@ -244,7 +292,7 @@ BEGIN
 END Serve;
 
 PROCEDURE Main;
-  VAR status, n: INTEGER; cmd: Text;
+  VAR status, n: INTEGER; cmd, name: Text; i: LONGINT;
 BEGIN
   status := Platform.System("rm -rf ../build/test-files && mkdir -p ../build/test-files/root/sub ../build/test-files/root/docs ../build/test-files/root/.git ../build/test-files/outside");
   IF status # 0 THEN Check.Check(FALSE, "make ../build/test-files"); Check.Summary; RETURN END;
@@ -258,6 +306,15 @@ BEGIN
   Write("root/.hidden", "hidden|"); Write("root/.git/config", "secret|");
   Write("outside/out.txt", "outside|"); Write("outside/secret.txt", "outside|");
   Write("root/locked.gmi", "locked|");
+  status := Platform.System("mkdir -p ../build/test-files/root/list/adir ../build/test-files/root/list/dir2 ../build/test-files/root/list/private ../build/test-files/root/list/.git ../build/test-files/root/many");
+  Write("root/list/adir/x.gmi", "x|"); Write("root/list/Z.txt", "Z|"); Write("root/list/a b.gmi", "ab|");
+  Write("root/list/a:b", "a:b|"); Write("root/list/b.gmi", "b|"); Write("root/list/été.gmi", "summer|");
+  Write("root/list/.hidden", "hidden|"); Write("root/list/private/p.gmi", "private|");
+  FOR i := 0 TO MaxEntries DO
+    name := "root/many/n"; IntToStr(i, cmd); Append(name, cmd); Write(name, "")
+  END;
+  status := Platform.System("cd ../build/test-files/root/list && ln -s ../a.gmi in.gmi && ln -s ../a.gmi .alias && ln -s ../../outside/out.txt out && ln -s ../.git/config cfg && mkfifo fifo && touch $(printf 'bad\377 c\001d')");
+  Check.Check(status = 0, "the files to list made");
   status := Platform.System("cd ../build/test-files && ln -s root rootlink && cd root && ln -s a.gmi link.gmi && ln -s docs linkdir && ln -s .git/config cfg.txt && ln -s ../outside/out.txt out.txt && ln -s ../outside outdir && ln -s /etc/passwd passwd && mkfifo fifo && chmod 000 locked.gmi");
   Check.Check(status = 0, "the files, links and FIFO made");
   root := Run("test `id -u` = 0") = 0;
@@ -271,6 +328,10 @@ BEGIN
   Serve("-host localhost -root ../build/test-files/rootlink -cert ../build/certs/self-ec.crt -key ../build/certs/self-ec.key",
     n, 1);
   Serve("-host localhost -cert ../build/certs/self-ec.crt -key ../build/certs/self-ec.key", 2, 2);
+  Serve("-host localhost -root ../build/test-files/rootlink -require /list/private -cert ../build/certs/self-ec.crt -key ../build/certs/self-ec.key -listings",
+    Listed, 3);
+  Check.Check((Run("exec ../build/pogemini -host localhost -cert ../build/certs/self-ec.crt -key ../build/certs/self-ec.key -listings") = 1)
+    & Check.Contains(got, "pogemini: -listings: it needs -root"), "-listings without -root: refused, 1");
 
   IF Platform.System("chmod 644 ../build/test-files/root/locked.gmi && rm -rf ../build/test-files") # 0 THEN END;
   Check.Summary

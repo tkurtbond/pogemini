@@ -59,7 +59,7 @@ BEGIN
     Check.Check(FALSE, "make ../build/test-config"); Check.Summary; RETURN
   END;
 
-  Write("good", "# every setting|listen ::1|  port 1966  |deadline	2500|connections 100|user gemini|certdir /var/lib/po gemini   # a comment|| # and another|capsule Example.ORG|  alias WWW.example.org|  alias example.net|  root /srv/a#b c |  cert /etc/a.crt|  key /etc/a.key|require /private/|  identity SHA256:0123456789ABCDEF0123456789abcdef0123456789abcdef0123456789abcdef|  identity sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff|require /a b|capsule 127.0.0.1|  require /|capsule ::1");
+  Write("good", "# every setting|listen ::1|  port 1966  |deadline	2500|connections 100|user gemini|certdir /var/lib/po gemini   # a comment|| # and another|capsule Example.ORG|  alias WWW.example.org|  alias example.net|  root /srv/a#b c |  cert /etc/a.crt|  key /etc/a.key|  listings yes|require /private/|  identity SHA256:0123456789ABCDEF0123456789abcdef0123456789abcdef0123456789abcdef|  identity sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff|require /a b|capsule 127.0.0.1|  listings yes|  listings no|  require /|capsule ::1");
   Check.Check(Read("good"), "a file with every setting");
   IF error # "" THEN Out.String("  error: "); Out.String(error); Out.Ln END;
   Check.Check((c.listen = "::1") & (c.port = 1966) & (c.deadline = 2500), "  ... listen, port and deadline");
@@ -80,6 +80,8 @@ BEGIN
     "  ... and the first's identities, as libtls writes a hash");
   Check.Check((c.capsules[1].name = "127.0.0.1") & (c.capsules[2].name = "::1")
     & (c.capsules[2].cert = ""), "  ... the others, addresses, without cert");
+  Check.Check(k.listings & ~c.capsules[1].listings & ~c.capsules[2].listings,
+    "  ... listings: yes in the first, no after yes in the second, none by default");
   Check.Check((c.capsules[1].nAreas = 1) & (c.capsules[1].areas[0].path = "/")
     & (c.capsules[2].nAreas = 0), "  ... a require of / in the second, none in the third");
   Check.Check(GemConfig.Within("/private", "/private") & GemConfig.Within("/private/a.gmi", "/private")
@@ -122,6 +124,9 @@ BEGIN
     "../build/test-config/bad:2: a second capsule for a.example");
   Bad("an alias that is another's name", "capsule a.example|capsule b.example|alias a.example",
     "../build/test-config/bad:3: a second capsule for a.example");
+  Bad("listings outside a capsule", "listings yes", "../build/test-config/bad:1: listings outside a capsule");
+  Bad("listings neither yes nor no", "capsule a.example|listings on",
+    "../build/test-config/bad:2: listings is yes or no");
   Bad("require outside a capsule", "require /x", "../build/test-config/bad:1: require outside a capsule");
   Bad("identity outside a require", "capsule a.example|identity SHA256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
     "../build/test-config/bad:2: identity outside a require");
@@ -168,6 +173,7 @@ BEGIN
     & (c.user = "gemini") & (c.certdir = "/var/lib/pogemini/certs") & (c.n = 2)
     & (c.capsules[0].name = "example.org") & (c.capsules[0].nAliases = 1)
     & (c.capsules[0].cert # "") & (c.capsules[0].nAreas = 1) & (c.capsules[0].areas[0].nIds = 1)
+    & ~c.capsules[0].listings & c.capsules[1].listings
     & (c.capsules[1].name = "example.net") & (c.capsules[1].cert = "")
     & (c.capsules[1].nAreas = 1) & (c.capsules[1].areas[0].nIds = 0),
     "  ... its settings and two capsules");

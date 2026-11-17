@@ -87,7 +87,7 @@ END UrlChar;
 
 (* s[0..n-1] is well-formed UTF-8 (RFC 3629): no overlong forms, no
    surrogates, nothing over U+10FFFF. *)
-PROCEDURE Utf8(VAR s: ARRAY OF CHAR; n: LONGINT): BOOLEAN;
+PROCEDURE Utf8*(VAR s: ARRAY OF CHAR; n: LONGINT): BOOLEAN;
   VAR i, k: LONGINT; c: INTEGER; lo, hi: CHAR;
 BEGIN
   i := 0;

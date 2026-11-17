@@ -46,7 +46,11 @@ and poDateTime": Peaseblossom's "Ongoing library enhancements" 7,
 step 3). Since then pogemini has no C of its own: running as another
 user, resolving and opening files, and running `openssl` come from
 pounix, and `GemAccess`'s time from poDateTime (PLAN.md, "pounix":
-Peaseblossom's step 4).
+Peaseblossom's step 4). Since 2026-11-17 a capsule may list its
+directories without `index.gmi` (`listings yes`, `-listings`; off by
+default), never showing a hidden name or anything not served, through
+pounix's `UnixFiles.OpenDirectory` (pounix Phase 8, so pounix must be
+that new): PLAN.md, "Directory listings".
 
 **poc 0.14.0 or later** (`StopRequests`), **and pounix, polibtls,
 posockets and poDateTime built by the same poc.** A poc library works

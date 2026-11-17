@@ -322,7 +322,8 @@ Done 2026-11-16: `src/GemFiles.Mod`, with a C part, `src/GemFiles.c`
 Decided:
 
 - **What is served**: regular files only. A directory asked for with
-  a final `/` gives its `index.gmi`, or 51: no listings. Without the
+  a final `/` gives its `index.gmi`, or 51: no listings (since
+  2026-11-17, a listing if asked for: "Directory listings"). Without the
   `/`, 31 to the path as sent (`rawPath`) with `/` added, the query
   kept, as a reference relative to the request, so its index's links
   resolve against the directory. An empty path is `/`, served without a
@@ -687,6 +688,51 @@ what is pogemini's policy stays here, in Oberon.
   where the C would have signalled process -1. `make test` passed on
   Linux (299 checks), and `gmake test` on alerik, artos, yishana,
   jherek and cymoril (296 to 298, as before).
+
+### Directory listings [done]
+
+Asked for 2026-11-17: a directory without `index.gmi` listed, opt-in,
+per capsule and by a flag, never showing hidden names. pounix's Phase 8
+(`UnixFiles.OpenDirectory`, `NextName`, `CloseDirectory`) reads the
+names, so pogemini still has no C.
+
+- **Off unless asked for**: `listings yes|no` in a capsule (no by
+  default; a bad value or one outside a capsule is a configuration
+  error), and `-listings` for the command line's capsule, the one
+  option without a value, refused without `-root`. A capsule that never
+  meant to list would show files it hasn't linked to.
+- **When**: a directory asked for with a final `/` whose `index.gmi`
+  is Missing (none, or nothing that would be served). A Failed one is
+  still 40, and a refused one still its 6x.
+- **What is shown**: exactly what a request for it would be served,
+  judged the same way: each entry resolved and checked by
+  `OpenResolved` (under the root, no hidden segment in its real path, a
+  regular file or a directory), then by `GemAccess.Refusal`, the old
+  `Allowed`'s test without its header, so a require the client may not
+  have is left out. Besides, a name beginning with `.` is never shown,
+  even a link to a file that is served: the mutation that takes this
+  out shows TestFiles' `.alias`, which `OpenResolved` alone lets
+  through. And a name a link line can't carry, with a control
+  character or not UTF-8 (`GemRequest.Utf8`, now exported), is left
+  out.
+- **The page**: `text/gemini`, `# <path>`, a blank line, `=> ../ ../`
+  except at `/`, then `=> <name>[/] <name>[/]` per entry, the link
+  percent-encoded except RFC 3986's unreserved, so `a:b` is a relative
+  path, not a scheme. Directories first, then files, each by the bytes
+  of their names (a merge sort of a list; poc compares `CHAR`s
+  unsigned, so UTF-8 sorts after ASCII, as TestFiles checks). At most
+  `MaxEntries` (10000), then a line "More entries are not listed.";
+  checked with 10001 files. The page is gathered into 16 KiB pieces,
+  since each `Write` is a TLS record of its own, and the paths a listing
+  needs are on the heap, out of a 64 KiB task stack.
+- **Tests**: `TestFiles` serves the same root again with `-listings`
+  (given last) and `-require /list/private`, 7 connections, and checks
+  `-listings` without `-root` exits 1; `TestConfig` the setting, its
+  errors, and `contrib/pogemini.conf`'s `listings yes`. The hidden,
+  control/UTF-8 and access filters were each checked against a
+  mutation. `make test` passed on Linux, 313 checks, and `gmake test`
+  on FreeBSD, NetBSD and OpenBSD, amd64 and i386 (2026-11-17), with
+  pounix's Phase 8.
 
 ## Open questions
 

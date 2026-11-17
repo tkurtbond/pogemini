@@ -3,14 +3,15 @@ MODULE pogemini; (* A Gemini server *)
 (* Usage: pogemini [-config file] [-listen host] [-port port]
                    [-deadline ms] [-connections n] [-user name]
                    [-certdir dir] [-n count]
-                   [-host name]... [-root dir] [-cert file -key file]
-                   [-require path]...
+                   [-host name]... [-root dir [-listings]]
+                   [-cert file -key file] [-require path]...
 
    Serves the capsules in the configuration file (GemConfig gives its
    format), and one more given on the command line: its name is the
-   first -host, any others its aliases, with -root, -cert, -key and
-   -require (a path that needs a client certificate; identities, which
-   narrow which, are given only in the file), and
+   first -host, any others its aliases, with -root, -listings (its
+   directories without index.gmi listed, as listings in the file),
+   -cert, -key and -require (a path that needs a client certificate;
+   identities, which narrow which, are given only in the file), and
    it comes first, so it is the one a client that sends no SNI is shown.
    Without -host, that capsule serves any host, and needs -cert and
    -key. Options given here override the file's.
@@ -61,7 +62,8 @@ PROCEDURE Usage;
 BEGIN
   Err.String("usage: pogemini [-config file] [-listen host] [-port port] [-deadline ms]"); Err.Ln;
   Err.String("                [-connections n] [-user name] [-certdir dir] [-n count]"); Err.Ln;
-  Err.String("                [-host name]... [-root dir] [-cert file -key file] [-require path]..."); Err.Ln;
+  Err.String("                [-host name]... [-root dir [-listings]] [-cert file -key file]"); Err.Ln;
+  Err.String("                [-require path]..."); Err.Ln;
   Platform.Exit(2)
 END Usage;
 
@@ -165,7 +167,7 @@ PROCEDURE Main;
     why: ARRAY GemConfig.ErrorLen OF CHAR;
     hosts: ARRAY GemConfig.MaxAliases + 1 OF GemConfig.Name;
     requires: ARRAY GemConfig.MaxAreas OF GemConfig.Path;
-    count, x: LONGINT; i, j, nHosts, nRequires: INTEGER;
+    count, x: LONGINT; i, j, nHosts, nRequires: INTEGER; listings: BOOLEAN;
     k: GemConfig.Capsule; a: GemConfig.Area; s: GemServer.Server; err: Sockets.Error;
     uerr: UnixErrors.Error;
 BEGIN
@@ -174,17 +176,26 @@ BEGIN
   file := ""; i := 1;
   WHILE i < Args.argc DO
     Args.Get(i, arg);
-    IF i + 1 >= Args.argc THEN Usage END;
-    IF arg = "-config" THEN Args.Get(i + 1, file) END;
-    INC(i, 2)
+    IF arg = "-listings" THEN INC(i)  (* the one option without a value *)
+    ELSE
+      IF i + 1 >= Args.argc THEN Usage END;
+      IF arg = "-config" THEN Args.Get(i + 1, file) END;
+      INC(i, 2)
+    END
   END;
   IF (file # "") & ~GemConfig.Read(config, file, why) THEN Fail("", why) END;
 
   cert := ""; key := ""; root := ""; certdir := config.certdir; nHosts := 0; nRequires := 0; count := 0;
+  listings := FALSE;
   i := 1;
   WHILE i < Args.argc DO
-    Args.Get(i, arg); Args.Get(i + 1, value);
-    IF arg = "-config" THEN
+    Args.Get(i, arg); value := "";
+    IF arg = "-listings" THEN
+      listings := TRUE; DEC(i)  (* it has no value: the INC below passes it alone *)
+    ELSE Args.Get(i + 1, value)
+    END;
+    IF arg = "-listings" THEN
+    ELSIF arg = "-config" THEN
     ELSIF arg = "-host" THEN
       IF nHosts = LEN(hosts) THEN Usage END;
       COPY(value, hosts[nHosts]); INC(nHosts)
@@ -210,13 +221,14 @@ BEGIN
     END;
     INC(i, 2)
   END;
+  IF listings & (root = "") THEN Fail("-listings", "it needs -root, whose directories it lists") END;
   IF (nHosts > 0) OR (cert # "") OR (key # "") OR (root # "") OR (nRequires > 0) THEN
     IF nHosts = 0 THEN hosts[0] := "" END;
     IF ~config.Add(hosts[0], TRUE, k, why) THEN Fail("-host", why) END;
     FOR j := 1 TO nHosts - 1 DO
       IF ~config.AddAlias(k, hosts[j], why) THEN Fail("-host", why) END
     END;
-    k.cert := cert; k.key := key; k.root := root;
+    k.cert := cert; k.key := key; k.root := root; k.listings := listings;
     FOR j := 0 TO nRequires - 1 DO
       IF ~GemConfig.AddArea(k, requires[j], a, why) THEN Fail("-require", why) END
     END

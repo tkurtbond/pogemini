@@ -21,29 +21,39 @@ MODULE GemAccess; (* Paths that need a client certificate *)
 
 IMPORT Instants, Clocks, GemServer, GemConfig;
 
-(* Whether x may have path, in capsule k; if not, x has its header. *)
-PROCEDURE Allowed*(x: GemServer.Exchange; k: GemConfig.Capsule; path: ARRAY OF CHAR): BOOLEAN;
+(* 0 if x may have path, in capsule k; if not, the status that refuses
+   it, with its meta, and x is left as it was, as for a directory's
+   listing, which leaves out what x may not have (GemFiles). *)
+PROCEDURE Refusal*(x: GemServer.Exchange; k: GemConfig.Capsule; path: ARRAY OF CHAR;
+    VAR meta: ARRAY OF CHAR): INTEGER;
   VAR i, j: INTEGER; a: GemConfig.Area; t: Instants.Instant; now: HUGEINT;
 BEGIN
   FOR i := 0 TO k.nAreas - 1 DO
     a := k.areas[i];
     IF GemConfig.Within(path, a.path) THEN
-      IF x.certHash = NIL THEN
-        IF x.Header(60, "client certificate required") THEN END; RETURN FALSE
-      END;
+      IF x.certHash = NIL THEN COPY("client certificate required", meta); RETURN 60 END;
       Clocks.Now(t); now := Instants.UnixSeconds(t);
       IF (x.notBefore < 0) OR (now < x.notBefore) OR (now > x.notAfter) THEN
-        IF x.Header(62, "certificate not valid") THEN END; RETURN FALSE
+        COPY("certificate not valid", meta); RETURN 62
       END;
       IF a.nIds > 0 THEN
         j := 0; WHILE (j < a.nIds) & (a.ids[j] # x.certHash^) DO INC(j) END;
-        IF j = a.nIds THEN
-          IF x.Header(61, "certificate not authorised") THEN END; RETURN FALSE
-        END
+        IF j = a.nIds THEN COPY("certificate not authorised", meta); RETURN 61 END
       END
     END
   END;
-  RETURN TRUE
+  meta[0] := 0X;
+  RETURN 0
+END Refusal;
+
+(* Whether x may have path, in capsule k; if not, x has its header. *)
+PROCEDURE Allowed*(x: GemServer.Exchange; k: GemConfig.Capsule; path: ARRAY OF CHAR): BOOLEAN;
+  VAR meta: ARRAY 64 OF CHAR; status: INTEGER;
+BEGIN
+  status := Refusal(x, k, path, meta);
+  IF status = 0 THEN RETURN TRUE END;
+  IF x.Header(status, meta) THEN END;
+  RETURN FALSE
 END Allowed;
 
 END GemAccess.

@@ -17,6 +17,7 @@ MODULE GemConfig; (* The configuration: a file of our own, and capsules *)
        root /srv/gemini/example.org    another name, its documents,
        cert /etc/pogemini/example.org.crt   and its certificate and key
        key /etc/pogemini/example.org.key    (made if neither is given)
+       listings yes            a directory without index.gmi listed
        require /private        a path that needs a client certificate,
          identity SHA256:3f0c...   and those it accepts (any, if none)
 
@@ -35,7 +36,11 @@ MODULE GemConfig; (* The configuration: a file of our own, and capsules *)
    name is kept in lower case, as GemRequest gives a request's host, and
    must be a DNS name or an IP address, written plainly (::1, not [::1])
    in ASCII: it names files and goes to openssl's command line
-   (GemCert), so nothing else is let through. *)
+   (GemCert), so nothing else is let through.
+
+   listings is yes or no, and no unless given: a capsule lists its
+   directories only when asked to, since one that never meant to would
+   show files it hasn't linked to (GemFiles). *)
 
 IMPORT Files, Strings;
 
@@ -72,6 +77,7 @@ TYPE
     aliases*: ARRAY MaxAliases OF Name;
     nAliases*: INTEGER;
     root*, cert*, key*: Path; (* "" when not given *)
+    listings*: BOOLEAN;       (* a directory without index.gmi listed *)
     areas*: ARRAY MaxAreas OF Area;
     nAreas*: INTEGER
   END;
@@ -178,6 +184,7 @@ BEGIN
   IF (n # "") & ~ValidName(n) THEN COPY("not a host name: ", why); Strings.Append(name, why); RETURN FALSE END;
   IF c.Find(n) # NIL THEN COPY("a second capsule for ", why); Strings.Append(n, why); RETURN FALSE END;
   NEW(k); k.name := n; k.nAliases := 0; k.root := ""; k.cert := ""; k.key := ""; k.nAreas := 0;
+  k.listings := FALSE;
   IF first THEN
     FOR i := c.n TO 1 BY -1 DO c.capsules[i] := c.capsules[i - 1] END;
     c.capsules[0] := k
@@ -342,7 +349,8 @@ PROCEDURE Setting(c: Config; VAR k: Capsule; VAR a: Area; key, value: ARRAY OF C
 BEGIN
   IF value = "" THEN COPY(key, why); Strings.Append(" needs a value", why); RETURN FALSE END;
   IF (key = "capsule") OR (key = "alias") OR (key = "listen") OR (key = "port")
-    OR (key = "deadline") OR (key = "identity") OR (key = "connections") OR (key = "user") THEN
+    OR (key = "deadline") OR (key = "identity") OR (key = "connections") OR (key = "user")
+    OR (key = "listings") THEN
     IF ~OneWord(value) THEN COPY(key, why); Strings.Append(" takes one word", why); RETURN FALSE END
   END;
   IF key = "capsule" THEN a := NIL; RETURN c.Add(value, FALSE, k, why)
@@ -352,6 +360,12 @@ BEGIN
   ELSIF key = "identity" THEN
     IF a = NIL THEN COPY("identity outside a require", why); RETURN FALSE END;
     RETURN AddIdentity(a, value, why)
+  ELSIF key = "listings" THEN
+    IF k = NIL THEN COPY("listings outside a capsule", why); RETURN FALSE
+    ELSIF value = "yes" THEN k.listings := TRUE
+    ELSIF value = "no" THEN k.listings := FALSE
+    ELSE COPY("listings is yes or no", why); RETURN FALSE
+    END
   ELSIF (key = "alias") OR (key = "root") OR (key = "cert") OR (key = "key") THEN
     IF k = NIL THEN COPY(key, why); Strings.Append(" outside a capsule", why); RETURN FALSE
     ELSIF key = "alias" THEN RETURN c.AddAlias(k, value, why)

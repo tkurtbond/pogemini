@@ -17,7 +17,7 @@
 .Op Fl certdir Ar dir
 .Op Fl n Ar count
 .Op Fl host Ar name ...
-.Op Fl root Ar dir
+.Op Fl root Ar dir Op Fl listings
 .Op Fl cert Ar file Fl key Ar file
 .Op Fl require Ar path ...
 .Sh DESCRIPTION
@@ -92,6 +92,13 @@ connections, wait for them to end, and exit 0; for testing.
 The command line's capsule's name, or, after the first, an alias.
 .It Fl root Ar dir
 Its root: the files it serves.
+.It Fl listings
+List its directories that have no
+.Pa index.gmi ,
+as
+.Ic listings yes
+does; it needs
+.Fl root .
 .It Fl cert Ar file Fl key Ar file
 Its certificate and private key, in PEM.
 .It Fl require Ar path
@@ -166,6 +173,12 @@ with a page naming it, and anything else with 51.
 Its certificate, in PEM.
 .It Ic key Ar file
 Its private key, in PEM.
+.It Ic listings yes | no
+Whether a directory without
+.Pa index.gmi
+is listed; see
+.Sx FILES SERVED .
+No unless given.
 .It Ic require Ar path
 A path that needs a client certificate.
 .It Ic identity Ar hash
@@ -208,11 +221,25 @@ is served its
 asked for without, it is redirected (31) to the same path with the
 .Ql /
 added.
-There are no directory listings.
+A directory without
+.Pa index.gmi
+is answered 51, unless its capsule has
+.Ic listings yes
+.Pq or Fl listings :
+then it is listed, as a
+.Li text/gemini
+page with a link to its parent and to each file and directory in it
+that would be served, directories first, then files, each by the bytes
+of their names.
+A listing never shows a hidden name, anything a request for it would
+be refused, nor anything in a
+.Ic require
+the client may not have; at most 10000 names are listed, with a line
+saying there are more.
+Listings are off unless asked for, since they show files the capsule
+may never have linked to.
 .Pp
-Everything else is answered 51, not found: a name that isn't there, a
-directory without
-.Pa index.gmi ,
+Everything else is answered 51, not found: a name that isn't there,
 anything not a regular file, anything the server can't read, a name
 beginning with
 .Ql \&.
