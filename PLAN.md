@@ -530,7 +530,7 @@ Done 2026-11-16:
 
 - README.md is the user's guide: requirements, building and installing,
   a first capsule, a configuration, running it as a service.
-  `doc/pogemini.1` is the reference, in mdoc so that mandoc (the BSDs)
+  `docs/pogemini.1` is the reference, in mdoc so that mandoc (the BSDs)
   and groff (Linux) both read it; `mandoc -T lint -W warning` is clean.
 - `contrib/pogemini.conf` is a commented example configuration;
   `TestConfig` reads it and checks every setting, so it can't drift
@@ -759,3 +759,9 @@ names, so pogemini still has no C.
 - ~~A test client: our own module in `test/`, or polibtls's
   `GeminiFetch` (an example, not installed)?~~ Our own in `test/`
   (2026-11-16, with the user): "Design".
+- The listen backlog: `GemServer.Listen` passes 16 to `Sockets.Listen`,
+  far below `-connections` (256). A mild load test (2026-11-17,
+  `contrib/load-test.py`, `docs/mild-load-test.md`) found no errors and
+  flat memory and descriptors, but at 32 and 64 clients at once the
+  queue overflowed and clients waited 1 or 3 s for a SYN retry. Raise
+  it (128, or following `-connections` within `somaxconn`)?

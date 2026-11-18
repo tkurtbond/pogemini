@@ -31,7 +31,7 @@ What it does:
 
 It serves only static files: no CGI, no proxying.
 
-[`pogemini(1)`](doc/pogemini.1) is the reference: every option and
+[`pogemini(1)`](docs/pogemini.1) is the reference: every option and
 setting. [PLAN.md](PLAN.md) has the design and the roadmap, and
 [AGENTS.md](AGENTS.md) the working notes.
 

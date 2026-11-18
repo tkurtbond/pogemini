@@ -99,7 +99,7 @@ install:
 	@test -x $(BUILD)/pogemini || { echo "install: run make first"; exit 1; }
 	install -d $(DESTDIR)$(BINDIR) $(DESTDIR)$(MANDIR)/man1 $(DESTDIR)$(DOCDIR)
 	install -m 755 $(BUILD)/pogemini $(DESTDIR)$(BINDIR)/pogemini
-	install -m 644 doc/pogemini.1 $(DESTDIR)$(MANDIR)/man1/pogemini.1
+	install -m 644 docs/pogemini.1 $(DESTDIR)$(MANDIR)/man1/pogemini.1
 	install -m 644 README.md LICENSE contrib/pogemini.conf contrib/pogemini.service $(DESTDIR)$(DOCDIR)
 ifneq ($(RCSCRIPT),)
 	install -d $(DESTDIR)$(DOCDIR)/rc.d
