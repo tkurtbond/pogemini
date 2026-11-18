@@ -734,6 +734,21 @@ names, so pogemini still has no C.
   on FreeBSD, NetBSD and OpenBSD, amd64 and i386 (2026-11-17), with
   pounix's Phase 8.
 
+## To do later
+
+Left until the BSD hosts are next running (they were down on
+2026-11-17), from the listen backlog's change to 128 (83e75d5,
+"Open questions"):
+
+1. **`gmake test` on every BSD host** with the backlog of 128, as
+   "Testing on the BSD hosts" in AGENTS.md says, TestRun a few more
+   times. Expected to pass as before: no test fills a queue of 16.
+2. **Each host's cap on the listen backlog**: `sysctl
+   kern.ipc.soacceptqueue` on FreeBSD (alerik), `sysctl kern.somaxconn`
+   on NetBSD (artos, yishana) and OpenBSD (jherek, cymoril), recorded
+   here and in `docs/mild-load-test.md`. A cap below 128 would only
+   mean the kernel uses it instead, absorbing a smaller burst there.
+
 ## Open questions
 
 - ~~The configuration format: a small line-based file of our own, YAML
@@ -770,4 +785,4 @@ names, so pogemini still has no C.
   0.1 s instead of 3 s, and throughput was unchanged (about 2,700
   requests a second). Following `-connections` would gain little, as
   the kernel caps the backlog anyway; the BSD hosts' caps are not yet
-  checked.
+  checked ("To do later").
