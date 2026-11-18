@@ -246,7 +246,11 @@ BEGIN
     (* An IP literal: an IPv6 address, kept as written, lower case. *)
     j := i + 1;
     WHILE (j < end) & ((Hex(url[j]) >= 0) OR (url[j] = ":") OR (url[j] = ".")) DO INC(j) END;
-    IF (j = end) OR (url[j] # "]") OR (j = i + 1) THEN RETURN Fail(why, "a malformed IPv6 address") END;
+    (* j - i > LEN(r.host): its text, j - i - 1 bytes, wouldn't fit with
+       its 0X; no address is that long, and copying it would halt. *)
+    IF (j = end) OR (url[j] # "]") OR (j = i + 1) OR (j - i > LEN(r.host)) THEN
+      RETURN Fail(why, "a malformed IPv6 address")
+    END;
     h := 0; m := i + 1; WHILE m < j DO r.host[h] := Lower(url[m]); INC(h); INC(m) END;
     r.host[h] := 0X;
     i := j + 1

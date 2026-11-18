@@ -734,13 +734,35 @@ names, so pogemini still has no C.
   on FreeBSD, NetBSD and OpenBSD, amd64 and i386 (2026-11-17), with
   pounix's Phase 8.
 
+### A long IPv6 literal [done]
+
+Found 2026-11-18 by pogeminilib's Phase 1, whose
+`GeminiUrls.CheckRequest` is `GemRequest.Parse` carried over: `Parse`
+copied an IPv6 literal into the 256-byte `r.host` without checking its
+length, so `gemini://[` with 300 hex digits `]/` halted it with "index
+out of range" (checked with a throwaway program): one request from any
+client stopped the server. A literal over 255 bytes is now "a malformed
+IPv6 address" (59), as an unclosed one is; no address is that long.
+
+- **Tests**: `TestParse` takes the longest literal `r.host` holds (255
+  bytes) and refuses 256 and 300; against the old `Parse` it halts at
+  256. `Good` labels a long URL by its length, "(a URL of 267 bytes)",
+  rather than calling every one "the 1024-byte URL".
+- **The GNUmakefile**: a test now depends on `src/`'s modules too.
+  Before, a change to `GemRequest.Mod` alone left the tests built
+  against the old one: the check against the old `Parse` first passed,
+  because the tests weren't rebuilt.
+- `make test` passed on Linux, 316 checks. The BSDs wait for the hosts
+  (To do later).
+
 ## To do later
 
 Left until the BSD hosts are next running (they were down on
 2026-11-17), from the listen backlog's change to 128 (83e75d5,
 "Open questions"):
 
-1. **`gmake test` on every BSD host** with the backlog of 128, as
+1. **`gmake test` on every BSD host** with the backlog of 128 and the
+   IPv6 literal's bound (A long IPv6 literal), as
    "Testing on the BSD hosts" in AGENTS.md says, TestRun a few more
    times. Expected to pass as before: no test fills a queue of 16.
 2. **Each host's cap on the listen backlog**: `sysctl

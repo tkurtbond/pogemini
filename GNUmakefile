@@ -78,7 +78,7 @@ $(BUILD):
 $(PROGBINS): $(BUILD)/%: src/%.Mod $(SRCMODS) | $(BUILD)
 	cd src && $(POC) $(POCFLAGS) -library-path $(POCLIBDIR) -output-dir $(abspath $(BUILD)) -o $(abspath $@) $*.Mod
 
-$(TESTBINS): $(BUILD)/%: test/%.Mod $(TESTMODS) | $(BUILD)
+$(TESTBINS): $(BUILD)/%: test/%.Mod $(TESTMODS) $(SRCMODS) | $(BUILD)
 	cd test && $(POC) $(POCFLAGS) -import-path ../src -library-path $(POCLIBDIR) -output-dir $(abspath $(BUILD)) -o $(abspath $@) $*.Mod
 
 # The tests' certificates and keys, made afresh, never committed

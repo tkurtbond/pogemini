@@ -11,9 +11,21 @@ CONST BOM = "﻿";  (* U+FEFF as UTF-8 *)
 
 VAR r: GemRequest.Request; why: ARRAY 128 OF CHAR; status: INTEGER;
 
+(* Appends n, then " bytes)", to label. *)
+PROCEDURE Bytes(n: LONGINT; VAR label: ARRAY OF CHAR);
+  VAR d: ARRAY 12 OF CHAR; i, j: INTEGER;
+BEGIN
+  i := 0; REPEAT d[i] := CHR(ORD("0") + n MOD 10); n := n DIV 10; INC(i) UNTIL n = 0;
+  j := 0; WHILE label[j] # 0X DO INC(j) END;
+  WHILE i > 0 DO DEC(i); label[j] := d[i]; INC(j) END;
+  label[j] := 0X;
+  COPY(" bytes)", d); i := 0; WHILE d[i] # 0X DO label[j] := d[i]; INC(i); INC(j) END;
+  label[j] := 0X
+END Bytes;
+
 (* url parses, to host, port, path and, if query isn't "-", query. *)
 PROCEDURE Good(url, host: ARRAY OF CHAR; port: LONGINT; path, query: ARRAY OF CHAR);
-  VAR ok: BOOLEAN; label: ARRAY 1100 OF CHAR;
+  VAR ok: BOOLEAN; label: ARRAY 1100 OF CHAR; n: LONGINT;
 BEGIN
   status := GemRequest.Parse(url, r, why);
   ok := (status = GemRequest.Ok) & (r.scheme = "gemini") & (r.host = host)
@@ -21,7 +33,11 @@ BEGIN
   IF query = "-" THEN ok := ok & ~r.hasQuery & (r.query = "")
   ELSE ok := ok & r.hasQuery & (r.query = query)
   END;
-  COPY(url, label); IF LEN(url) > 100 THEN label := "(the 1024-byte URL)" END;
+  COPY(url, label);
+  IF LEN(url) > 100 THEN
+    n := 0; WHILE url[n] # 0X DO INC(n) END;
+    IF n > 100 THEN label := "(a URL of "; Bytes(n, label) END
+  END;
   Check.Check(ok, label);
   IF ~ok THEN
     Out.String("  status "); Out.Int(status, 0); Out.String(" "); Out.String(why);
@@ -121,6 +137,15 @@ BEGIN
   Bad("an IPv6 address unclosed", "gemini://[::1/", 59, "a malformed IPv6 address");
   Bad("an IPv6 address not hex", "gemini://[::g]/", 59, "a malformed IPv6 address");
   Bad("an empty IPv6 address", "gemini://[]/", 59, "a malformed IPv6 address");
+  (* The longest literal r.host holds, 255 bytes, and longer, which
+     once halted Parse with an index out of range. *)
+  u := "gemini://["; FOR i := 10 TO 264 DO u[i] := "a" END; u[265] := "]"; u[266] := "/"; u[267] := 0X;
+  FOR i := 0 TO 254 DO p[i] := "a" END; p[255] := 0X;
+  Good(u, p, 1965, "/", "-");
+  u := "gemini://["; FOR i := 10 TO 265 DO u[i] := "a" END; u[266] := "]"; u[267] := "/"; u[268] := 0X;
+  Bad("an IPv6 address of 256 bytes", u, 59, "a malformed IPv6 address");
+  u := "gemini://["; FOR i := 10 TO 309 DO u[i] := "a" END; u[310] := "]"; u[311] := "/"; u[312] := 0X;
+  Bad("an IPv6 address of 300 bytes", u, 59, "a malformed IPv6 address");
   Bad("text after an IPv6 address", "gemini://[::1]x/", 59, "a malformed host");
   Bad("a bracket in a host", "gemini://h]/", 59, "a malformed host");
   Bad("an encoded space in a host", "gemini://a%20b/", 59, "a malformed host");
