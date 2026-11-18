@@ -759,9 +759,15 @@ names, so pogemini still has no C.
 - ~~A test client: our own module in `test/`, or polibtls's
   `GeminiFetch` (an example, not installed)?~~ Our own in `test/`
   (2026-11-16, with the user): "Design".
-- The listen backlog: `GemServer.Listen` passes 16 to `Sockets.Listen`,
+- ~~The listen backlog: `GemServer.Listen` passes 16 to `Sockets.Listen`,
   far below `-connections` (256). A mild load test (2026-11-17,
   `contrib/load-test.py`, `docs/mild-load-test.md`) found no errors and
   flat memory and descriptors, but at 32 and 64 clients at once the
   queue overflowed and clients waited 1 or 3 s for a SYN retry. Raise
-  it (128, or following `-connections` within `somaxconn`)?
+  it (128, or following `-connections` within `somaxconn`)?~~ 128
+  (2026-11-17, with the user): at 64 clients the kernel dropped none,
+  against about 580 in 15 s with 16, the worst request took about
+  0.1 s instead of 3 s, and throughput was unchanged (about 2,700
+  requests a second). Following `-connections` would gain little, as
+  the kernel caps the backlog anyway; the BSD hosts' caps are not yet
+  checked.

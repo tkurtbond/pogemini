@@ -319,7 +319,10 @@ PROCEDURE (s: Server) Listen*(host: ARRAY OF CHAR; port: INTEGER;
   VAR a: Sockets.Address;
 BEGIN
   StopRequests.Catch;
-  IF ~Sockets.Listen(host, port, 16, TRUE, s.listeners, s.n, err)
+  (* A backlog of 16 overflowed under 32 and 64 clients at once, and a
+     dropped client waited 1 or 3 s for its SYN to be retried; 128 held
+     them all (docs/mild-load-test.md). *)
+  IF ~Sockets.Listen(host, port, 128, TRUE, s.listeners, s.n, err)
     OR ~Sockets.LocalAddress(s.listeners[0], a, err) THEN
     RETURN FALSE
   END;

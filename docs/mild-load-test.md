@@ -39,15 +39,34 @@ and no timeouts.
   dropped SYN is retried by the client's TCP after 1 s, then 3 s, which
   are exactly the outliers.
 
-## What it suggests
+## The backlog raised to 128
 
-The backlog of 16 is smaller than `-connections` (256 by default), so
-under a burst a client may wait for a SYN retry rather than in the
-queue, as pogemini(1) describes. Raising the backlog (to 128, say, or
-to follow `-connections`, within the kernel's own limit,
-`net.core.somaxconn` on Linux, `kern.ipc.somaxconn` on the BSDs) would
-remove the outliers. It matters little in practice: real Gemini traffic
-rarely has 16 handshakes arriving at once. Not changed yet.
+The backlog of 16 was smaller than `-connections` (256 by default), so
+under a burst a client could wait for a SYN retry rather than in the
+queue, as pogemini(1) describes. With it raised to 128, the 64-client
+level was run twice for each backlog, on another port, the same
+capsule, counting the kernel's drops with `nstat`:
+
+| Backlog | req/s | Drops | p50 | p95 | p99 | max |
+|---|---|---|---|---|---|---|
+| 16 | 2,699 / 2,662 | 590 / 567 | 9.9 ms | 12.7 ms | 1,021 ms | 3,070 ms |
+| 128 | 2,716 / 2,759 | 0 / 0 | 23 ms | 27 ms | 30–35 ms | 93–128 ms |
+
+- **No drops, so no retries:** the worst request took about 0.1 s
+  instead of 3 s.
+- **Throughput is unchanged**, about 2,700 requests a second: the
+  queue changes how clients wait, not how fast they are served.
+- **The median rose from 10 to 23 ms, and that is the honest figure.**
+  With 16, many clients were at any moment sleeping in a SYN retry, so
+  fewer competed; with 128, all 64 wait their turn, and 64 clients at
+  2,750 requests a second is 23 ms each.
+- The server's resident memory rose from 10–11 MiB to 12 MiB, serving
+  more connections at once; it still held 7 file descriptors.
+
+`make test` passed with the change, and pogemini now passes 128. It
+matters little for real Gemini traffic, which rarely has 16 handshakes
+arriving at once. The kernel caps the backlog (`net.core.somaxconn`,
+4096 here on Linux); the BSD hosts' caps have not been checked.
 
 ## Running it again
 
