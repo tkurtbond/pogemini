@@ -145,6 +145,17 @@ for newsyslog; on NetBSD and OpenBSD to syslog, as `daemon.info`
 (`/var/log/messages` and `/var/log/daemon`), where a line over about
 1000 bytes is split in two.
 
+## An earlier, simpler version
+
+The version first announced, tagged
+[`announced`](https://github.com/tkurtbond/pogemini/tree/announced),
+is easier to read as a whole: its request parsing, response writing
+and server loop are its own, where this version takes them from
+[pogeminilib](https://github.com/tkurtbond/pogeminilib), and it has
+fewer features. It builds and passes its tests with poc 0.14.0. Read
+it, but don't serve with it: it halts on a request with an IPv6
+literal over 255 bytes, fixed since.
+
 ## License
 
 BSD 3-Clause; see [LICENSE](LICENSE).
