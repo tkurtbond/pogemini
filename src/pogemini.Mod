@@ -204,16 +204,17 @@ END Log;
 (* A rule's name looked up again (GemRules): its new addresses, or why
    the lookup failed. *)
 PROCEDURE Report(r: GemConfig.Rule; why-: ARRAY OF CHAR);
-  VAR i: INTEGER; t: ARRAY 48 OF CHAR;
+  VAR i, n: LONGINT; t: ARRAY 48 OF CHAR;
 BEGIN
   Time;
+  n := 0; IF r.addrs # NIL THEN n := LEN(r.addrs^) END;
   IF r.allow THEN Out.String("allow ") ELSE Out.String("deny ") END;
   Out.String(r.name);
   IF why # "" THEN
-    Out.String(": lookup failed, kept "); Out.Int(r.nAddrs, 0); Out.String(" addresses: "); Out.String(why)
+    Out.String(": lookup failed, kept "); Out.Int(n, 0); Out.String(" addresses: "); Out.String(why)
   ELSE
     Out.String(": now");
-    FOR i := 0 TO r.nAddrs - 1 DO GemAddresses.Format(r.addrs[i], t); Out.Char(" "); Out.String(t) END
+    FOR i := 0 TO n - 1 DO GemAddresses.Format(r.addrs[i], t); Out.Char(" "); Out.String(t) END
   END;
   Out.Ln
 END Report;
@@ -355,7 +356,7 @@ BEGIN
   IF ~GemRules.Start(config, Report, why) THEN Fail("", why) END;
   s := GeminiServer.New(Context(), Respond);
   s.SetLog(Log); s.SetDeadline(config.deadline); s.SetLimit(config.connections);
-  IF config.nRules > 0 THEN s.SetAdmit(GemRules.Admit) END;
+  IF config.rules # NIL THEN s.SetAdmit(GemRules.Admit) END;
   IF ~s.Listen(config.listen, SHORT(config.port), err) THEN Fail("listen", err.text) END;
   (* Listening first, as root, for a port below 1024; the listeners are
      closed before failing, not left to the kernel (make valgrind). *)

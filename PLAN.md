@@ -987,7 +987,8 @@ two steps, addresses first and names after. `allow` and `deny` lines,
 global only, each naming an IPv4 or IPv6 address, a range (CIDR), `all`
 or a host name; checked in order as a connection is accepted, the first
 match deciding and no match meaning served, as in a firewall and
-nginx's `allow`/`deny`. At most 64 (`GemConfig.MaxRules`).
+nginx's `allow`/`deny`. As many as the file has, in a list ("No limit",
+below).
 
 - **Before the handshake.** pogeminilib gained `GeminiServer.SetAdmit`
   and the `refused` event (its "Refusing clients by address"): a
@@ -1007,10 +1008,10 @@ nginx's `allow`/`deny`. At most 64 (`GemConfig.MaxRules`).
   writes RFC 5952's form, for the log.
 - **Names forward, never reverse.** A client's address is never looked
   up: reverse DNS is the client's to control, and slow. A rule's name
-  is resolved when the server starts (`Sockets.ResolveWithin`, 10 s
+  is resolved when the server starts (`Sockets.ResolveAllWithin`, 10 s
   each), one that doesn't resolve being a mistake in the configuration
   (exit 1); then by a task every `refresh` seconds (default 300, 0
-  never, at most 86400) through `SocketTasks.Resolve`, which waits in a
+  never, at most 86400) through `SocketTasks.ResolveAll`, which waits in a
   thread, so the server goes on serving. A failed lookup keeps the
   addresses the name had, since a name server down for a moment
   shouldn't let in a client denied or keep out one allowed, and is
@@ -1019,7 +1020,7 @@ nginx's `allow`/`deny`. At most 64 (`GemConfig.MaxRules`).
   other task sees half made, tasks being cooperative.
 - **Tests.** TestConfig: parsing and formatting addresses, ranges and
   their refusals, the rules read, ordered and matched, a name by the
-  addresses given it, and MaxRules. TestRun, through the server: `deny
+  addresses given it, and 1000 rules. TestRun, through the server: `deny
   127.0.0.1` refuses that client and serves `::1`, logging both;
   `allow localhost` then `deny all` serves both before and after a
   1 s refresh, with nothing reported; `deny localhost` refuses both;
@@ -1035,6 +1036,16 @@ nginx's `allow`/`deny`. At most 64 (`GemConfig.MaxRules`).
 - **The BSDs.** `gmake test` of pogeminilib and pogemini, from their
   working trees, and TestRun three more times, passed on alerik,
   artos, yishana, jherek and cymoril (2026-11-19), with no FAIL.
+- **No limit** (2026-11-19, with the user). The rules were first an
+  array of 64 (`MaxRules`), and a name's addresses were looked up into
+  an array of 256, more than which posockets halted on ("Open
+  questions"). Now the rules are a list (`Rule.next`, in the file's
+  order), and posockets' `Sockets.ResolveAllWithin` and
+  `SocketTasks.ResolveAll` allocate an array that fits every address a
+  lookup gives (posockets' "Every address: lookups that allocate");
+  GemRules keeps the distinct ones in an array of their own size
+  (`Rule.addrs`, NIL before a lookup), so no number of rules or of
+  addresses is too many.
 
 ## To do later
 
@@ -1067,15 +1078,22 @@ the first two left until the BSD hosts were next running; all done
 
 ## Open questions
 
-- **posockets halts on a name with more addresses than its caller's
+- **GemConfig's other limits**: at most `MaxCapsules` (64) capsules,
+  `MaxAliases` (16) aliases a capsule, `MaxAreas` (32) `require`s a
+  capsule and `MaxIdentities` (64) identities a `require`, each an
+  array inside its record, refused past it with "too many ...". The
+  rules became a list (2026-11-19, "Address rules", "No limit"); should
+  these too, as lists or arrays allocated to fit? Identities first:
+  a `require` for a group of people is the one likeliest to grow past
+  its limit, and 64 hashes of 72 bytes sit in every Area whether used
+  or not. Capsules and aliases are few on any server.
+
+- ~~**posockets halts on a name with more addresses than its caller's
   array holds** (`Sockets.Resolve`, `ResolveWithin` and
-  `SocketTasks.Resolve`, AssertArgument 84, its HaltAddrs). For a rule's
-  name that is outside data, which shouldn't halt: GemRules gives it
-  256, far more than any name has, so the halt is out of reach in
-  practice, not in principle. Better would be for posockets to return
-  the first addresses that fit and say how many there were, or fail
-  with an error kind of its own; a change to posockets' documented
-  contract, so left for the user to decide.
+  `SocketTasks.Resolve`, AssertArgument 84, its HaltAddrs).~~ posockets
+  now allocates instead (`ResolveAllWithin`, `SocketTasks.ResolveAll`),
+  and GemRules uses that (2026-11-19, with the user: "Address rules",
+  "No limit").
 
 - ~~The configuration format: a small line-based file of our own, YAML
   through polibfyaml, or the command line only?~~ A file of our own and

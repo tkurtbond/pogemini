@@ -72,7 +72,6 @@ CONST
   MaxAreas* = 32;      (* requires in a capsule *)
   MaxIdentities* = 64; (* identities in a require *)
   HashLen* = 72;       (* "SHA256:", 64 hex digits, 0X *)
-  MaxRules* = 64;      (* allow and deny lines *)
   DefaultRefresh* = 300;  (* s between lookups of the rules' names *)
   MaxRefresh* = 86400;
   LineLen = 1100;
@@ -90,16 +89,19 @@ TYPE
     nIds*: INTEGER            (* 0: any certificate *)
   END;
 
+  (* A name's addresses, as many as it has: LEN is how many. *)
   Addresses* = POINTER TO ARRAY OF GemAddresses.Address;
 
-  (* An allow or deny line. *)
+  (* An allow or deny line, in a list in the file's order: as many as
+     the file has, since a list of addresses a server refuses may be
+     long. *)
   Rule* = POINTER TO RuleDesc;
   RuleDesc* = RECORD
     allow*: BOOLEAN;          (* allow, or deny *)
     name*: Name;              (* a host name, in ASCII, or "" *)
     range*: GemAddresses.Range;  (* when name is "" *)
     addrs*: Addresses;        (* name's, as last looked up; NIL before *)
-    nAddrs*: INTEGER
+    next*: Rule               (* the next line's, or NIL *)
   END;
 
   Capsule* = POINTER TO CapsuleDesc;
@@ -121,8 +123,8 @@ TYPE
     certdir*: Path;           (* "" when not given *)
     connections*: LONGINT;    (* -1 when not given *)
     user*: Name;              (* "" when not given *)
-    rules*: ARRAY MaxRules OF Rule;
-    nRules*: INTEGER;
+    rules*: Rule;             (* the first, or NIL for none *)
+    lastRule: Rule;           (* the last, where AddRule adds *)
     refresh*: LONGINT;        (* -1 when not given *)
     capsules*: ARRAY MaxCapsules OF Capsule;
     n*: INTEGER
@@ -132,7 +134,7 @@ PROCEDURE New*(): Config;
   VAR c: Config;
 BEGIN
   NEW(c); c.listen := ""; c.port := -1; c.deadline := -1; c.certdir := ""; c.n := 0;
-  c.connections := -1; c.user := ""; c.nRules := 0; c.refresh := -1;
+  c.connections := -1; c.user := ""; c.rules := NIL; c.lastRule := NIL; c.refresh := -1;
   RETURN c
 END New;
 
@@ -326,14 +328,13 @@ BEGIN
 END AddIdentity;
 
 (* Adds to c a rule, allow or deny, for what: an address, a range, all,
-   or a host name (the module's comment). FALSE, with why, if what is
-   none of them, or c has MaxRules. *)
+   or a host name (the module's comment), after those it has. FALSE,
+   with why, if what is none of them. *)
 PROCEDURE (c: Config) AddRule*(allow: BOOLEAN; what: ARRAY OF CHAR;
     VAR why: ARRAY OF CHAR): BOOLEAN;
   VAR r: Rule; i: LONGINT; digitsAndDots: BOOLEAN; reason: ARRAY 128 OF CHAR;
 BEGIN
-  IF c.nRules = MaxRules THEN COPY("too many allow and deny rules", why); RETURN FALSE END;
-  NEW(r); r.allow := allow; r.name := ""; r.addrs := NIL; r.nAddrs := 0;
+  NEW(r); r.allow := allow; r.name := ""; r.addrs := NIL; r.next := NIL;
   (* an address or range has ":" or "/", or is digits and dots; a name
      has a letter or hyphen, so 192.0.2.300 is refused, not looked up *)
   digitsAndDots := TRUE; i := 0;
@@ -348,26 +349,26 @@ BEGIN
     END
   ELSIF ~HostName(what, r.name, why) THEN RETURN FALSE
   END;
-  c.rules[c.nRules] := r; INC(c.nRules);
+  IF c.rules = NIL THEN c.rules := r ELSE c.lastRule.next := r END;
+  c.lastRule := r;
   RETURN TRUE
 END AddRule;
 
 (* Whether c serves a client at address a, by its rules as they stand
    (the module's comment). *)
 PROCEDURE (c: Config) Admits*(VAR a: GemAddresses.Address): BOOLEAN;
-  VAR i, j: INTEGER; r: Rule; one: GemAddresses.Range;
+  VAR j: LONGINT; r: Rule;
 BEGIN
-  FOR i := 0 TO c.nRules - 1 DO
-    r := c.rules[i];
+  r := c.rules;
+  WHILE r # NIL DO
     IF r.name = "" THEN
       IF GemAddresses.In(a, r.range) THEN RETURN r.allow END
-    ELSE
-      one.bits := 128;
-      FOR j := 0 TO r.nAddrs - 1 DO
-        one.a := r.addrs[j];
-        IF GemAddresses.In(a, one) THEN RETURN r.allow END
+    ELSIF r.addrs # NIL THEN
+      FOR j := 0 TO LEN(r.addrs^) - 1 DO
+        IF GemAddresses.Same(a, r.addrs[j]) THEN RETURN r.allow END
       END
-    END
+    END;
+    r := r.next
   END;
   RETURN TRUE
 END Admits;

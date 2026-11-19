@@ -86,20 +86,44 @@ BEGIN
   RETURN c.Admits(a)
 END Serves;
 
+(* c's rule i, counting from 0, or NIL. *)
+PROCEDURE Rule(i: LONGINT): GemConfig.Rule;
+  VAR r: GemConfig.Rule;
+BEGIN
+  r := c.rules;
+  WHILE (r # NIL) & (i > 0) DO r := r.next; DEC(i) END;
+  RETURN r
+END Rule;
+
+(* How many rules c has. *)
+PROCEDURE Rules(): LONGINT;
+  VAR r: GemConfig.Rule; n: LONGINT;
+BEGIN
+  n := 0; r := c.rules;
+  WHILE r # NIL DO INC(n); r := r.next END;
+  RETURN n
+END Rules;
+
 (* Gives c's rule i the one address s, as a lookup would. *)
 PROCEDURE Found(i: INTEGER; s: ARRAY OF CHAR);
+  VAR r: GemConfig.Rule;
 BEGIN
-  NEW(c.rules[i].addrs, 1); c.rules[i].nAddrs := 1;
-  IF GemAddresses.Parse(s, c.rules[i].addrs[0]) THEN END
+  r := Rule(i); NEW(r.addrs, 1);
+  IF GemAddresses.Parse(s, r.addrs[0]) THEN END
 END Found;
 
-(* Writes the file many: n lines of "deny all". *)
-PROCEDURE Many(n: INTEGER);
-  VAR t: ARRAY 1024 OF CHAR; line: ARRAY 10 OF CHAR; i, j, k: LONGINT;
+(* Writes the file many: n-1 lines of "allow 192.0.2.1", then "deny all". *)
+PROCEDURE Many(n: LONGINT);
+  VAR t: POINTER TO ARRAY OF CHAR; i, j, k: LONGINT;
+  PROCEDURE Line(s: ARRAY OF CHAR);
+  BEGIN
+    j := 0; WHILE s[j] # 0X DO t[k] := s[j]; INC(k); INC(j) END
+  END Line;
 BEGIN
-  line := "deny all|"; k := 0;
-  FOR i := 1 TO n DO FOR j := 0 TO 8 DO t[k] := line[j]; INC(k) END END;
-  t[k] := 0X; Write("many", t)
+  NEW(t, 16 * n + 1); k := 0;
+  FOR i := 1 TO n - 1 DO Line("allow 192.0.2.1|") END;
+  Line("deny all|");
+  t[k] := 0X; Write("many", t^)
 END Many;
 
 (* A file of text is refused, with error. *)
@@ -113,7 +137,7 @@ BEGIN
 END Bad;
 
 PROCEDURE Main;
-  VAR k, k2: GemConfig.Capsule; a: GemConfig.Area; why: ARRAY 256 OF CHAR; n, n2: GemConfig.Name;
+  VAR r0, r1, r2, r5: GemConfig.Rule; k, k2: GemConfig.Capsule; a: GemConfig.Area; why: ARRAY 256 OF CHAR; n, n2: GemConfig.Name;
 BEGIN
   IF Platform.System("rm -rf ../build/test-config && mkdir -p ../build/test-config") # 0 THEN
     Check.Check(FALSE, "make ../build/test-config"); Check.Summary; RETURN
@@ -272,10 +296,12 @@ BEGIN
     "  ... ranges refused");
 
   Write("rules", "refresh 60|allow 192.0.2.0/24|deny 192.0.2.7|allow Gemini.Example|deny ::1|allow 2001:db8::/32|deny all|capsule a.example");
-  Check.Check(Read("rules") & (c.nRules = 6) & (c.refresh = 60), "rules: read, in order");
+  Check.Check(Read("rules") & (Rules() = 6) & (c.refresh = 60), "rules: read, in order");
   IF error # "" THEN Out.String("  error: "); Out.String(error); Out.Ln END;
-  Check.Check(c.rules[0].allow & ~c.rules[1].allow & (c.rules[0].name = "") & (c.rules[2].name = "gemini.example")
-    & (c.rules[2].nAddrs = 0) & (c.rules[5].range.bits = 0), "  ... allow and deny, a name lowered, all");
+  r0 := Rule(0); r1 := Rule(1); r2 := Rule(2); r5 := Rule(5);
+  Check.Check(r0.allow & ~r1.allow & (r0.name = "") & (r2.name = "gemini.example")
+    & (r2.addrs = NIL) & (r5.range.bits = 0) & (r5.next = NIL),
+    "  ... allow and deny, a name lowered, all");
   Check.Check(Serves("192.0.2.7") & Serves("192.0.2.1") & ~Serves("192.0.3.1") & ~Serves("::1")
     & Serves("2001:db8::1") & ~Serves("2001:db9::1"), "  ... the first rule to match decides");
   Found(2, "198.51.100.9");
@@ -291,12 +317,10 @@ BEGIN
   Bad("a rule inside a capsule", "capsule a.example|deny all",
     "../build/test-config/bad:2: deny inside a capsule: global settings come first");
   Bad("refresh too large", "refresh 86401", "../build/test-config/bad:1: refresh is 0 to 86400 s");
-  Many(GemConfig.MaxRules);
-  Check.Check(Read("many") & (c.nRules = GemConfig.MaxRules), "  ... as many rules as MaxRules");
-  Many(GemConfig.MaxRules + 1);
-  Check.Check(~Read("many") & (error = "../build/test-config/many:65: too many allow and deny rules"),
-    "  ... and no more");
-  IF ~Check.Contains(error, "many:65:") THEN Out.String("  error: "); Out.String(error); Out.Ln END;
+  Many(1000);
+  Check.Check(Read("many") & (Rules() = 1000) & Serves("192.0.2.1") & ~Serves("192.0.2.2"),
+    "  ... 1000 rules, no limit, the last applied");
+  IF error # "" THEN Out.String("  error: "); Out.String(error); Out.Ln END;
 
   (* The example installed with the server: it must stay one the server
      reads, and say what its comments say. *)

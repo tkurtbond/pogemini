@@ -10,7 +10,7 @@ MODULE GemRules; (* allow and deny at work: who is served, and the names' lookup
    stops the server, as any other mistake in the configuration does.
    Then a task (Refresher) looks each up again every refresh seconds,
    without stopping the server meanwhile (posockets' SocketTasks.
-   Resolve, in a thread of its own). A lookup that fails keeps the
+   ResolveAll, in a thread of its own). A lookup that fails keeps the
    addresses the name had, since a name server that is down for a
    moment shouldn't let in a client denied, or keep out one allowed;
    it is reported, as is a change. The new addresses replace the old
@@ -21,9 +21,6 @@ IMPORT Strings, Tasks, Sockets, SocketTasks, GeminiServer, GemAddresses, GemConf
 
 CONST
   LookupLimit* = 10000;  (* ms a lookup has *)
-  (* A lookup's addresses, at most: posockets halts on more than its
-     caller can hold, so this is generous (PLAN.md, "Address rules"). *)
-  MaxLookup = 256;
   StackSize = 64 * 1024;
 
 TYPE
@@ -39,7 +36,6 @@ TYPE
 
 VAR
   config: GemConfig.Config;  (* whose rules Admit applies *)
-  found: ARRAY MaxLookup OF Sockets.Address;  (* a lookup's, here, not on a task's stack *)
 
 (* Whether the client at peer is served, by config's rules. A peer whose
    address can't be parsed, which accept never gives, is refused. *)
@@ -49,13 +45,13 @@ BEGIN
   RETURN GemAddresses.Parse(peer.host, a) & config.Admits(a)
 END Admit;
 
-(* found[0..n-1] as r's addresses: TRUE if they differ from those it had,
-   in any way but order. *)
-PROCEDURE Take(r: GemConfig.Rule; n: INTEGER): BOOLEAN;
-  VAR addrs: GemConfig.Addresses; i, j, k: INTEGER; changed, seen: BOOLEAN;
+(* found, a lookup's addresses, as r's: TRUE if they differ from those
+   it had, in any way but order. *)
+PROCEDURE Take(r: GemConfig.Rule; found: Sockets.Addresses): BOOLEAN;
+  VAR addrs, distinct: GemConfig.Addresses; i, j, k, had: LONGINT; changed, seen: BOOLEAN;
 BEGIN
-  NEW(addrs, n); k := 0;
-  FOR i := 0 TO n - 1 DO
+  NEW(addrs, LEN(found^)); k := 0;
+  FOR i := 0 TO LEN(found^) - 1 DO
     (* getaddrinfo may give one address twice *)
     IF GemAddresses.Parse(found[i].host, addrs[k]) THEN
       seen := FALSE;
@@ -65,32 +61,39 @@ BEGIN
       IF ~seen THEN INC(k) END
     END
   END;
-  changed := k # r.nAddrs;
+  distinct := NIL;
+  IF k > 0 THEN  (* never 0: posockets gives text it parses *)
+    NEW(distinct, k);
+    FOR i := 0 TO k - 1 DO distinct[i] := addrs[i] END
+  END;
+  had := 0; IF r.addrs # NIL THEN had := LEN(r.addrs^) END;
+  changed := k # had;
   FOR i := 0 TO k - 1 DO
     seen := FALSE;
-    FOR j := 0 TO r.nAddrs - 1 DO
-      IF GemAddresses.Same(addrs[i], r.addrs[j]) THEN seen := TRUE END
+    FOR j := 0 TO had - 1 DO
+      IF GemAddresses.Same(distinct[i], r.addrs[j]) THEN seen := TRUE END
     END;
     IF ~seen THEN changed := TRUE END
   END;
-  r.addrs := addrs; r.nAddrs := k;  (* one step: no task sees it half made *)
+  r.addrs := distinct;  (* one step: no task sees it half made *)
   RETURN changed
 END Take;
 
 (* Looks each rule's name up again every refresh seconds, for ever: the
    program ends when its main body does, tasks or no. *)
 PROCEDURE (t: Refresher) Run*;
-  VAR i, n: INTEGER; r: GemConfig.Rule; err: Sockets.Error;
+  VAR r: GemConfig.Rule; found: Sockets.Addresses; err: Sockets.Error;
 BEGIN
   LOOP
     Tasks.Sleep(t.config.refresh * 1000);
-    FOR i := 0 TO t.config.nRules - 1 DO
-      r := t.config.rules[i];
+    r := t.config.rules;
+    WHILE r # NIL DO
       IF r.name # "" THEN
-        IF ~SocketTasks.Resolve(r.name, 0, LookupLimit, found, n, err) THEN t.report(r, err.text)
-        ELSIF Take(r, n) THEN t.report(r, "")
+        IF ~SocketTasks.ResolveAll(r.name, 0, LookupLimit, found, err) THEN t.report(r, err.text)
+        ELSIF Take(r, found) THEN t.report(r, "")
         END
-      END
+      END;
+      r := r.next
     END
   END
 END Run;
@@ -101,20 +104,20 @@ END Run;
    report of each failure and change. FALSE, with why, if a name
    doesn't resolve, and c's rules not applied. *)
 PROCEDURE Start*(c: GemConfig.Config; report: Reporter; VAR why: ARRAY OF CHAR): BOOLEAN;
-  VAR i, n: INTEGER; r: GemConfig.Rule; err: Sockets.Error; names: BOOLEAN; t: Refresher;
+  VAR r: GemConfig.Rule; found: Sockets.Addresses; err: Sockets.Error; names: BOOLEAN; t: Refresher;
 BEGIN
-  names := FALSE;
-  FOR i := 0 TO c.nRules - 1 DO
-    r := c.rules[i];
+  names := FALSE; r := c.rules;
+  WHILE r # NIL DO
     IF r.name # "" THEN
       names := TRUE;
-      IF ~Sockets.ResolveWithin(r.name, 0, LookupLimit, found, n, err) THEN
+      IF ~Sockets.ResolveAllWithin(r.name, 0, LookupLimit, found, err) THEN
         IF r.allow THEN COPY("allow ", why) ELSE COPY("deny ", why) END;
         Strings.Append(r.name, why); Strings.Append(": ", why); Strings.Append(err.text, why);
         RETURN FALSE
       END;
-      IF Take(r, n) THEN END
-    END
+      IF Take(r, found) THEN END
+    END;
+    r := r.next
   END;
   config := c;
   IF names & (c.refresh > 0) THEN
