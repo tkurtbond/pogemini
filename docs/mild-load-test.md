@@ -65,8 +65,13 @@ capsule, counting the kernel's drops with `nstat`:
 
 `make test` passed with the change, and pogemini now passes 128. It
 matters little for real Gemini traffic, which rarely has 16 handshakes
-arriving at once. The kernel caps the backlog (`net.core.somaxconn`,
-4096 here on Linux); the BSD hosts' caps have not been checked.
+arriving at once. The kernel caps the backlog: on Linux at
+`net.core.somaxconn`, 4096 here. On the BSD hosts (2026-11-18) the
+cap is 128, the backlog itself: `kern.ipc.soacceptqueue` on FreeBSD
+15.1 (alerik) and `kern.somaxconn` on OpenBSD 7.9 (jherek, cymoril).
+NetBSD 11.0 (artos, yishana) has no sysctl for it; its
+`<sys/socket.h>` gives `SOMAXCONN` as 128, but whether its kernel caps
+a larger backlog there was not checked.
 
 ## Running it again
 

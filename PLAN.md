@@ -805,19 +805,25 @@ CA:FALSE, critical.
 
 ## To do later
 
-Left until the BSD hosts are next running (they were down on
-2026-11-17), from the listen backlog's change to 128 (83e75d5,
-"Open questions"):
+From the listen backlog's change to 128 (83e75d5, "Open questions"),
+the first two left until the BSD hosts were next running, and done
+2026-11-18:
 
-1. **`gmake test` on every BSD host** with the backlog of 128 and the
-   IPv6 literal's bound (A long IPv6 literal), as
-   "Testing on the BSD hosts" in AGENTS.md says, TestRun a few more
-   times. Expected to pass as before: no test fills a queue of 16.
-2. **Each host's cap on the listen backlog**: `sysctl
-   kern.ipc.soacceptqueue` on FreeBSD (alerik), `sysctl kern.somaxconn`
-   on NetBSD (artos, yishana) and OpenBSD (jherek, cymoril), recorded
-   here and in `docs/mild-load-test.md`. A cap below 128 would only
-   mean the kernel uses it instead, absorbing a smaller burst there.
+1. ~~**`gmake test` on every BSD host** with the backlog of 128 and the
+   IPv6 literal's bound~~: passed on alerik, artos, yishana, jherek and
+   cymoril, TestRun three more times each, at 2d74833 and again at
+   048c747 ("Certificates through TlsMake"), both after 83e75d5 and
+   7fa7f64.
+2. ~~**Each host's cap on the listen backlog**~~: 128 on every BSD host
+   that has a sysctl for it (`kern.ipc.soacceptqueue` on FreeBSD,
+   `kern.somaxconn` on OpenBSD), so pogemini's 128 is used whole there;
+   NetBSD has no sysctl, and its header's `SOMAXCONN` is 128. Recorded
+   in `docs/mild-load-test.md`.
+3. **NetBSD's cap, from its source**: whether NetBSD 11.0's kernel
+   caps a listen backlog at `somaxconn` (`solisten` in
+   `sys/kern/uipc_socket.c`), and what sets that, read in the source at
+   `/usr/local/sw/src/OS/NetBSD/netbsd-11.0-src` on atla once it is
+   there; then recorded here and in `docs/mild-load-test.md`.
 
 ## Open questions
 
