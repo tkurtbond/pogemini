@@ -928,6 +928,31 @@ reads of unwritten words in it by the collector's conservative scan
 (`--track-origins`: "created by a stack allocation" in `Serve`), which
 writing its arrays whole didn't clear; as before, it reports none.
 
+### GemCert through pogeminilib [done]
+
+Decided with the user, 2026-11-19: the "made once and kept" logic of
+`GemCert.Ensure` moves to pogeminilib as
+`GeminiIdentities.Ensure(dir, name, names, days, ...)` (its PLAN.md, "A
+server's certificate"), so pogeminilib's `GeminiServe -certs` makes
+its certificate the same way, and `GemCert` keeps only what is
+pogemini's: the default directory, the names from the capsule's name
+and aliases, 3650 days, and halt 105. Nothing a user sees changes: the
+same files and modes, the directory made 700, a `.crt` alone refused
+("has no key beside it"), a `.key` alone given its certificate, and
+the same messages, pogeminilib's wording matched to `GemCert`'s. A
+capsule named by its IPv6 address (`::1`) still gets `::1.crt`:
+`Ensure` lets a name hold `:`, though an identity's can't. A name over
+64 characters, refused before by TlsMake (a CN's limit), is now refused
+by `Ensure`'s name check. Needs pogeminilib with `Ensure` installed.
+`GemConfig.Within`'s comment names `GeminiUrls.CheckRequest`, not the
+`GemRequest` it replaced.
+
+`make test` and `make valgrind` pass on Fedora against pogeminilib
+with `Ensure`, and `gmake test` on the five BSD hosts, no FAIL or
+assertion (skips as before: 2 to 4, for want of a peer). A parent
+directory that is a file gives "can't make the certificate directory",
+as before, since `Ensure` takes `ENOTDIR` as missing.
+
 ## To do later
 
 From the listen backlog's change to 128 (83e75d5, "Open questions"),

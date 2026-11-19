@@ -55,7 +55,9 @@ makes certificates through polibtls's `TlsMake`, so pogemini needs no
 `openssl` at run time, only its tests do (PLAN.md, "Certificates
 through TlsMake"; polibtls d935372 or later), and makes a new
 certificate directory its owner's only with pounix's
-`UnixFiles.ChangeMode` (pounix Phase 11, so pounix must be that new).
+`UnixFiles.ChangeMode` (pounix Phase 11, so pounix must be that new). Since 2026-11-19 that is pogeminilib's
+`GeminiIdentities.Ensure`, which `GemCert` calls (PLAN.md, "GemCert
+through pogeminilib"), so pogeminilib must be that new.
 Since 2026-11-18 the engine, the request's check and the listing's
 writing are pogeminilib's (`~/Repos/Oberon/pogeminilib`, its Phase 8):
 `GemServer` is gone for `GeminiServer`, with pogemini's log line

@@ -223,8 +223,8 @@ BEGIN
   RETURN TRUE
 END AddAlias;
 
-(* Whether path, a request's, normalised (GemRequest), is within area
-   path a: a itself, or below it. *)
+(* Whether path, a request's, normalised (GeminiUrls.CheckRequest), is
+   within area path a: a itself, or below it. *)
 PROCEDURE Within*(path, a: ARRAY OF CHAR): BOOLEAN;
   VAR i: LONGINT;
 BEGIN
