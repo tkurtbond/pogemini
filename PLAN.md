@@ -963,6 +963,23 @@ gmni segfaults on a relative one, and without one would read the user's
 own known hosts. `-4`, since gmni can't connect to a bracketed IPv6
 address (polibtls's PLAN.md, "gmni, on BearSSL").
 
+### TestServe under a loaded valgrind [done]
+
+2026-11-19: `make valgrind` failed now and then in TestServe, with no
+output, on a loaded machine (load average about 10). Reproduced with 40
+busy loops on 32 cores: valgrind's server took over a second for a
+handshake, so it closed the connection at its `-deadline 1000`, and the
+test's next write raised SIGPIPE, which killed it before any check was
+printed. Now TestServe ignores SIGPIPE (`Sockets.IgnoreBrokenPipe`,
+after Hash, whose pipeline would inherit it), so such a write is a
+failed check; gives the server 3000 ms under valgrind
+(`$POGEMINI_UNDER`), still below GemClient's 5000, which the "at the
+deadline" check needs; and, with TestRequests, waits 15 s rather than
+5 for the server's port, as the other tests do. Eight runs of both
+under valgrind with load averages 16 to 18 then passed. Under the 40
+loops (load about 50) the server still overran 3000 ms: no deadline
+that fits under GemClient's survives that.
+
 ## To do later
 
 From the listen backlog's change to 128 (83e75d5, "Open questions"),

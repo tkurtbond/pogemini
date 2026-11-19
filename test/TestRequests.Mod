@@ -253,7 +253,7 @@ BEGIN
   line[0] := CHR(ORD("0") + count DIV 10); line[1] := CHR(ORD("0") + count MOD 10); line[2] := 0X;
   Append(cmd, line);
   Append(cmd, " -cert ../build/certs/self-ec.crt -key ../build/certs/self-ec.key");
-  IF ~Child.Spawn(cmd, "", 0, c) OR ~Child.ReadLine(c, line, 5000) OR ~StartsWith(line, "port ") THEN
+  IF ~Child.Spawn(cmd, "", 0, c) OR ~Child.ReadLine(c, line, 15000) OR ~StartsWith(line, "port ") THEN
     Check.Check(FALSE, "the server starts and says its port");
     Child.Kill(c); IF Child.Wait(c, log, n) # 0 THEN END; Out.String(log); Out.Ln;
     Check.Summary; RETURN

@@ -16,7 +16,6 @@ CONST
   Certs = "../build/certs/";
   Client1Crt = "../build/certs/client1-ec.crt";
   Client1Key = "../build/certs/client1-ec.key";
-  Deadline = 1000;  (* the server's, ms: short, for the silent clients *)
   Count = 10;       (* the connections Test makes *)
   CR = 0DX; LF = 0AX;
   (* The test's tasks pass whole responses (64 KiB) by value, to
@@ -28,6 +27,11 @@ TYPE
   Rsa = POINTER TO RECORD (Tasks.TaskDesc) port: INTEGER END;
 
 VAR
+  (* The server's deadline, ms: short, for the silent clients, but
+     longer under valgrind ($POGEMINI_UNDER), where a loaded machine
+     can take a second over a handshake and the server then closes the
+     connection before the request is written. *)
+  deadline: LONGINT;
   hash: ARRAY 128 OF CHAR;  (* client1-ec.crt's, as the log gives it *)
   home: ARRAY 64 OF CHAR;   (* gemini://localhost:<the server's port>/ *)
   longest: ARRAY 1100 OF CHAR;  (* a URL of 1024 bytes, the most there may be *)
@@ -163,12 +167,12 @@ BEGIN
   END;
   r := Fetch("127.0.0.1", t.port, home, "", "");
   Expect(r, "20 text/gemini", "served while two clients say nothing");
-  Check.Check(Platform.Time() - start < Deadline, "  ... without waiting for them");
+  Check.Check(Platform.Time() - start < deadline, "  ... without waiting for them");
   IF silent # NIL THEN
     r := GemClient.Receive(silent);
     n := Platform.Time() - start;
     Check.Check(~r.ok & (r.len = 0), "the silent TLS client is dropped, without close_notify");
-    Check.Check((n >= Deadline - 100) & (n < GemClient.Deadline), "  ... at the deadline");
+    Check.Check((n >= deadline - 100) & (n < GemClient.Deadline), "  ... at the deadline");
     GemClient.Close(silent)
   END;
   IF tcp # NIL THEN
@@ -194,7 +198,7 @@ PROCEDURE Start(kind: ARRAY OF CHAR; count: INTEGER; VAR c: Child.Child;
     i: INTEGER; p: LONGINT;
 BEGIN
   cmd := "exec $POGEMINI_UNDER ../build/pogemini -port 0 -deadline ";
-  n[0] := CHR(ORD("0") + Deadline DIV 1000); n[1] := "0"; n[2] := "0"; n[3] := "0"; n[4] := 0X;
+  n[0] := CHR(ORD("0") + deadline DIV 1000); n[1] := "0"; n[2] := "0"; n[3] := "0"; n[4] := 0X;
   Append(cmd, n); Append(cmd, " -n ");
   n[0] := CHR(ORD("0") + count DIV 10); n[1] := CHR(ORD("0") + count MOD 10); n[2] := 0X;
   Append(cmd, n);
@@ -202,7 +206,7 @@ BEGIN
   Append(cmd, ".crt -key "); Append(cmd, Certs); Append(cmd, "self-"); Append(cmd, kind);
   Append(cmd, ".key");
   IF ~Child.Spawn(cmd, "", 0, c) THEN RETURN FALSE END;
-  IF ~Child.ReadLine(c, line, 5000) OR ~StartsWith(line, "port ") THEN
+  IF ~Child.ReadLine(c, line, 15000) OR ~StartsWith(line, "port ") THEN
     Out.String("  "); Out.String(line); Child.Kill(c); RETURN FALSE
   END;
   p := 0; i := 5;
@@ -230,8 +234,16 @@ END Hash;
 PROCEDURE Main;
   VAR c: Child.Child; t: Test; rsa: Rsa; port: INTEGER; i: LONGINT;
     log: ARRAY 65536 OF CHAR; line: ARRAY 1200 OF CHAR;
+    under: ARRAY 512 OF CHAR;
 BEGIN
+  IF Platform.getEnv("POGEMINI_UNDER", under) & (under # "") THEN deadline := 3000
+  ELSE deadline := 1000
+  END;
   Hash(Client1Crt, hash);
+  (* Before any client: a write to a connection the server has closed
+     must fail, as a check, and not end the test unseen by SIGPIPE.
+     After Hash, whose pipeline would inherit it. *)
+  Sockets.IgnoreBrokenPipe;
   IF ~Start("ec", Count, c, port) THEN
     Check.Check(FALSE, "the server starts and says its port");
     IF Child.Wait(c, log, i) # 0 THEN END; Out.String(log); Out.Ln
