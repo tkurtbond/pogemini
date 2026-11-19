@@ -892,6 +892,42 @@ artos, yishana, jherek and cymoril (237 to 239 checks; pogeminilib's `gmake test
 `Close` from its working tree. valgrind is Linux's here, so the
 target is run on Linux.
 
+### Internationalised host names [done]
+
+Decided with the user, 2026-11-18: a request's host and a capsule's
+names are compared in their ASCII form, by pogeminilib's
+`GeminiPunycode.ToAscii` (punycode only, its level 1). The Gemini
+specification says nothing of IDNs, so a client may send either form;
+SNI carries the ASCII form (RFC 6066), which is what a certificate
+names.
+
+- `GemConfig.HostName` converts a capsule's name or alias, from the
+  file or `-host`, before `ValidName` checks it, so `bücher.example`
+  may be written in UTF-8 and is kept, matched and given a made
+  certificate as `xn--bcher-kva.example`. One that won't convert is
+  refused with ToAscii's reason ("not a host name: a..example (label
+  2: empty)").
+- `pogemini.Respond` converts the request's host, as `CheckRequest`
+  gives it (decoded, lower case), before `CapsuleFor`; one that won't
+  convert is 59, "the host has no ASCII form: ...". An ASCII host is
+  unchanged, so nothing that matched before matches differently.
+- Not done, as level 1 leaves out: non-ASCII case folding and NFC, so
+  `BÜCHER.example` misses (to the capsule for any host, or 53), never
+  reaching the wrong capsule.
+
+Tests: `TestConfig` (`HostName`: UTF-8 in capitals, the ASCII form, an
+address, malformed UTF-8; a name not a host name once ASCII; the two
+refusals that now give ToAscii's reason), `TestCapsules` (a capsule
+named `bücher.example` in the file, reached as `bücher.example`, as
+`xn--bcher-kva.example` and percent-encoded in capitals, its made
+certificate naming `DNS:xn--bcher-kva.example`, and `a..example`
+refused 59). The new requests are a run of their own (4 connections)
+rather than more in the first: making that run's `-n` two digits
+changed `TestCapsules.Serve`'s frame, and memcheck then reported three
+reads of unwritten words in it by the collector's conservative scan
+(`--track-origins`: "created by a stack allocation" in `Serve`), which
+writing its arrays whole didn't clear; as before, it reports none.
+
 ## To do later
 
 From the listen backlog's change to 128 (83e75d5, "Open questions"),
@@ -940,10 +976,11 @@ the first two left until the BSD hosts were next running; all done
 - ~~Which libtls on FreeBSD and NetBSD: LibreTLS from ports/pkgsrc, or
   LibreSSL's?~~ LibreTLS, from packages; OpenBSD's own in base
   (polibtls's Phase 10, 2026-11-16).
-- Internationalised host names: should `bücher.example` in a request
+- ~~Internationalised host names: should `bücher.example` in a request
   match a capsule named `xn--bcher-kva.example`, and the other way
   round? (~~IRIs in requests~~: their non-ASCII characters are accepted
-  as UTF-8, Phase 2.)
+  as UTF-8, Phase 2.)~~ Yes, both ways (the user, 2026-11-18): each is
+  compared in its ASCII form, "Internationalised host names".
 - ~~A test client: our own module in `test/`, or polibtls's
   `GeminiFetch` (an example, not installed)?~~ Our own in `test/`
   (2026-11-16, with the user): "Design".

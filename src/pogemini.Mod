@@ -42,7 +42,10 @@ MODULE pogemini; (* A Gemini server *)
 
    A request is checked by pogeminilib's GeminiUrls.CheckRequest, and
    answered by the capsule its
-   host names (by name or alias), or else by the one for any host. One
+   host names (by name or alias), or else by the one for any host. Its
+   host is compared in its ASCII form (GemConfig), so bücher.example
+   and xn--bcher-kva.example name the same capsule; a host that has no
+   ASCII form is refused, 59. One
    that names none, or for a port other than the one listened on, is
    refused, 53: this server is no proxy.
 
@@ -52,7 +55,7 @@ MODULE pogemini; (* A Gemini server *)
    without answers "/" with a page naming it, and anything else 51. *)
 
 IMPORT Platform, Out, Err, Args, Strings, Directories, Clocks, Instants, TimeStrings,
-  Sockets, Tls, UnixErrors, UnixUsers, GeminiUrls, GeminiTextWriter, GeminiServer,
+  Sockets, Tls, UnixErrors, UnixUsers, GeminiUrls, GeminiPunycode, GeminiTextWriter, GeminiServer,
   GemConfig, GemCert, GemFiles, GemAccess;
 
 VAR
@@ -76,12 +79,13 @@ BEGIN
   Platform.Exit(1)
 END Fail;
 
-(* The capsule that serves r, or NIL if this server serves it not. *)
-PROCEDURE CapsuleFor(VAR r: GeminiUrls.Request): GemConfig.Capsule;
+(* The capsule that serves r, whose host's ASCII form is host, or NIL
+   if this server serves it not. *)
+PROCEDURE CapsuleFor(VAR r: GeminiUrls.Request; host: ARRAY OF CHAR): GemConfig.Capsule;
   VAR k: GemConfig.Capsule;
 BEGIN
   IF r.port # port THEN RETURN NIL END;
-  k := config.Find(r.host);
+  k := config.Find(host);
   IF k = NIL THEN k := any END;
   RETURN k
 END CapsuleFor;
@@ -104,13 +108,16 @@ END Page;
 
 PROCEDURE Respond(x: GeminiServer.Exchange);
   VAR r: GeminiUrls.Request; why: ARRAY 128 OF CHAR; status: INTEGER;
-    k: GemConfig.Capsule;
+    k: GemConfig.Capsule; host: GemConfig.Name; meta: ARRAY 160 OF CHAR;
 BEGIN
   status := GeminiUrls.CheckRequest(x.request, r, why);
   IF status # GeminiUrls.Ok THEN
     IF x.Header(status, why) THEN END
+  ELSIF ~GeminiPunycode.ToAscii(r.host, host, why) THEN
+    COPY("the host has no ASCII form: ", meta); Strings.Append(why, meta);
+    IF x.Header(GeminiUrls.BadRequest, meta) THEN END
   ELSE
-    k := CapsuleFor(r);
+    k := CapsuleFor(r, host);
     IF k = NIL THEN
       IF x.Header(GeminiUrls.Refused, "not served here") THEN END
     ELSIF ~GemAccess.Allowed(x, k, r.path) THEN  (* refused, with its header *)

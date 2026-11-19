@@ -108,7 +108,9 @@ configuration file, `pogemini -config /etc/pogemini.conf`:
       listings yes                  # list directories without index.gmi
 
 A capsule answers its name and its aliases; a request for any other
-host, or another port, is refused (53). An identity is a client
+host, or another port, is refused (53). An internationalised name may
+be written in UTF-8 (`bücher.example`) or in its ASCII form
+(`xn--bcher-kva.example`), and a request in either form reaches it. An identity is a client
 certificate's SHA-256 hash, as the log shows it. Options on the command
 line override the file. `contrib/pogemini.conf`, installed in
 `share/doc/pogemini`, is a commented example, and `pogemini(1)`

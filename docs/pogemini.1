@@ -158,10 +158,12 @@ line to the next:
 A capsule, for the host
 .Ar name ,
 a DNS name or an IP address, written plainly
-.Pq Li ::1 , not Li [::1] ,
-in ASCII; an internationalised name is written in its
-.Li xn--
-form.
+.Pq Li ::1 , not Li [::1] .
+An internationalised name may be written in UTF-8
+.Pq Li bücher.example
+or in its ASCII form
+.Pq Li xn--bcher-kva.example ;
+it is kept, and its certificate made, in the ASCII form.
 .It Ic alias Ar name
 Another name for it.
 .It Ic root Ar dir
@@ -192,6 +194,15 @@ The first capsule is the one shown to a client that names no host in
 TLS (SNI), and the one whose certificate it sees.
 A request is answered by the capsule whose name or alias its host is,
 or else by the one for any host.
+The host is compared in its ASCII form, so a request for
+.Li bücher.example ,
+in UTF-8 or percent-encoded, and one for
+.Li xn--bcher-kva.example
+reach the same capsule; a host with no ASCII form (an empty label, a
+label too long) is refused with 59.
+Letters beyond ASCII are not case-folded or normalised, so
+.Li BÜCHER.example
+names no capsule.
 A request for a host no capsule has, or for another port than the one
 listened on, is refused with 53:
 .Nm

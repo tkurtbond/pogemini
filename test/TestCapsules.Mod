@@ -114,6 +114,19 @@ BEGIN
   END
 END Expect;
 
+(* Fetches url from 127.0.0.1, with no SNI: the response must begin
+   with header. *)
+PROCEDURE ExpectRefused(url, header, label: ARRAY OF CHAR);
+  VAR req: Text; r: GemClient.Response; len: LONGINT; ok: BOOLEAN;
+BEGIN
+  GemClient.servername := "127.0.0.1";
+  COPY(url, req); len := Length(req); req[len] := CR; req[len + 1] := LF; INC(len, 2);
+  r := GemClient.Fetch("127.0.0.1", port, req, len, "", "");
+  ok := r.ok & StartsWith(r.data^, header);
+  Check.Check(ok, label);
+  IF ~ok THEN Out.String("  error: "); Out.String(r.error); Out.String(", response: "); Out.String(r.data^); Out.Ln END
+END ExpectRefused;
+
 (* gemini://host:port/ *)
 PROCEDURE Url(host: ARRAY OF CHAR; VAR url: ARRAY OF CHAR);
 BEGIN
@@ -140,6 +153,16 @@ BEGIN
   ELSIF t.run = 2 THEN
     Url("gen.example", u);
     Expect("gen.example", u, "gen.example", gen, "run again: the same certificate for gen.example")
+  ELSIF t.run = 4 THEN
+    Url("bücher.example", u);
+    Expect("xn--bcher-kva.example", u, "xn--bcher-kva.example", none,
+      "bücher.example, named so in the file: its capsule, by its ASCII form");
+    Url("xn--bcher-kva.example", u);
+    Expect("xn--bcher-kva.example", u, "xn--bcher-kva.example", none, "  ... asked for in its ASCII form");
+    Url("B%C3%BCcher.Example", u);
+    Expect("xn--bcher-kva.example", u, "xn--bcher-kva.example", none, "  ... percent-encoded, in capitals");
+    Url("a..example", u);
+    ExpectRefused(u, "59 the host has no ASCII form: ", "a host with no ASCII form (an empty label): 59")
   ELSE
     Url("nowhere.example", u);
     Expect("nowhere.example", u, "*", selfRsa, "-cert alone: a capsule for any host, its certificate shown first");
@@ -218,7 +241,7 @@ BEGIN
   Check.Check((selfEc # "") & (otherRsa # "") & (selfRsa # ""), "the test certificates' hashes");
 
   Write("../build/test-capsules/pogemini.conf",
-    "# three capsules|port 1965|deadline 5000|certdir ../build/test-capsules/certs||capsule localhost|  alias ::1|  root ../build/test-capsules/root|  cert ../build/certs/self-ec.crt|  key ../build/certs/self-ec.key|capsule other.example|  alias www.other.example|  cert ../build/certs/other-rsa.crt|  key ../build/certs/other-rsa.key|capsule gen.example|");
+    "# four capsules|port 1965|deadline 5000|certdir ../build/test-capsules/certs||capsule localhost|  alias ::1|  root ../build/test-capsules/root|  cert ../build/certs/self-ec.crt|  key ../build/certs/self-ec.key|capsule other.example|  alias www.other.example|  cert ../build/certs/other-rsa.crt|  key ../build/certs/other-rsa.key|capsule gen.example|capsule bücher.example|");
   args := "-config ../build/test-capsules/pogemini.conf";
 
   gen := "";
@@ -237,6 +260,9 @@ BEGIN
     & (Run("openssl x509 -in ../build/test-capsules/certs/gen.example.crt -noout -checkend 315532800") # 0),
     "  ... valid for 3650 days");
   Serve(args, 1, 2);
+  Serve(args, 4, 4);
+  Check.Check((Run("openssl x509 -in ../build/test-capsules/certs/xn--bcher-kva.example.crt -noout -text") = 0)
+    & Check.Contains(got, "DNS:xn--bcher-kva.example"), "  ... and a certificate made for its ASCII form");
   args := "-config ../build/test-capsules/pogemini.conf -cert ../build/certs/self-rsa.crt -key ../build/certs/self-rsa.key";
   Serve(args, 2, 3);
 

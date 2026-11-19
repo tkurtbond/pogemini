@@ -53,7 +53,7 @@ BEGIN
 END Bad;
 
 PROCEDURE Main;
-  VAR k, k2: GemConfig.Capsule; a: GemConfig.Area; why: ARRAY 256 OF CHAR;
+  VAR k, k2: GemConfig.Capsule; a: GemConfig.Area; why: ARRAY 256 OF CHAR; n, n2: GemConfig.Name;
 BEGIN
   IF Platform.System("rm -rf ../build/test-config && mkdir -p ../build/test-config") # 0 THEN
     Check.Check(FALSE, "make ../build/test-config"); Check.Summary; RETURN
@@ -151,14 +151,22 @@ BEGIN
   Bad("an underscore", "capsule a_b.example", "../build/test-config/bad:1: not a host name: a_b.example");
   Bad("a hyphen first", "capsule -a.example", "../build/test-config/bad:1: not a host name: -a.example");
   Bad("a hyphen last", "capsule a-.example", "../build/test-config/bad:1: not a host name: a-.example");
-  Bad("an empty label", "capsule a..example", "../build/test-config/bad:1: not a host name: a..example");
+  Bad("an empty label", "capsule a..example", "../build/test-config/bad:1: not a host name: a..example (label 2: empty)");
   Bad("a final dot", "capsule a.example.", "../build/test-config/bad:1: not a host name: a.example.");
   Bad("a quote", "capsule a'b", "../build/test-config/bad:1: not a host name: a'b");
   Bad("brackets", "capsule [::1]", "../build/test-config/bad:1: not a host name: [::1]");
-  Bad("not ASCII", "capsule bücher.example", "../build/test-config/bad:1: not a host name: bücher.example");
+  Bad("not ASCII, and not a host name once ASCII", "capsule bücher_.example",
+    "../build/test-config/bad:1: not a host name: bücher_.example");
+  Check.Check(GemConfig.HostName("Bücher.Example", n, why) & (n = "xn--bcher-kva.example"),
+    "HostName: UTF-8, in capitals, to its ASCII form");
+  Check.Check(GemConfig.HostName("XN--bcher-KVA.example", n, why) & (n = "xn--bcher-kva.example")
+    & GemConfig.HostName("::1", n, why) & (n = "::1"), "  ... its ASCII form, and an address, lowered");
+  n := "bxcher.example"; n[1] := 0FCX;
+  Check.Check(~GemConfig.HostName(n, n2, why) & Check.Contains(why, "not a host name: b"),
+    "  ... refused: malformed UTF-8");
   Bad("a label too long",
     "capsule a234567890123456789012345678901234567890123456789012345678901234.example",
-    "../build/test-config/bad:1: not a host name: a234567890123456789012345678901234567890123456789012345678901234.example");
+    "../build/test-config/bad:1: not a host name: a234567890123456789012345678901234567890123456789012345678901234.example (label 1: over 63 bytes)");
   Check.Check(~GemConfig.ValidName("a.example.") & GemConfig.ValidName("a-b.example")
     & GemConfig.ValidName("xn--bcher-kva.example") & GemConfig.ValidName("localhost")
     & GemConfig.ValidName("2001:db8::1") & GemConfig.ValidName("10.0.0.1"),

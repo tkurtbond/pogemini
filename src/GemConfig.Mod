@@ -33,16 +33,18 @@ MODULE GemConfig; (* The configuration: a file of our own, and capsules *)
 
    A value is the rest of the line with its spaces trimmed, so a file
    name may contain spaces; a name or number must be one word. A host
-   name is kept in lower case, as GemRequest gives a request's host, and
-   must be a DNS name or an IP address, written plainly (::1, not [::1])
-   in ASCII: it names files and a made certificate's names
-   (GemCert), so nothing else is let through.
+   name is kept in its ASCII form, as pogemini compares a request's
+   host: lower case, and a label beyond ASCII (bücher, in UTF-8) as
+   punycode (xn--bcher-kva), by pogeminilib's GeminiPunycode.ToAscii
+   (HostName). It must then be a DNS name or an IP address, written
+   plainly (::1, not [::1]): it names files and a made certificate's
+   names (GemCert), so nothing else is let through.
 
    listings is yes or no, and no unless given: a capsule lists its
    directories only when asked to, since one that never meant to would
    show files it hasn't linked to (GemFiles). *)
 
-IMPORT Files, Strings;
+IMPORT Files, Strings, GeminiPunycode;
 
 CONST
   MaxCapsules* = 64;
@@ -158,6 +160,21 @@ BEGIN
   END
 END ValidName;
 
+(* name, a host name in ASCII or UTF-8, as n, its ASCII form (the
+   module's comment), if that is a ValidName; FALSE, with why, if not. *)
+PROCEDURE HostName*(name: ARRAY OF CHAR; VAR n: Name; VAR why: ARRAY OF CHAR): BOOLEAN;
+  VAR reason: ARRAY 128 OF CHAR;
+BEGIN
+  IF ~GeminiPunycode.ToAscii(name, n, reason) THEN
+    COPY("not a host name: ", why); Strings.Append(name, why);
+    Strings.Append(" (", why); Strings.Append(reason, why); Strings.Append(")", why);
+    RETURN FALSE
+  ELSIF ~ValidName(n) THEN
+    COPY("not a host name: ", why); Strings.Append(name, why); RETURN FALSE
+  END;
+  RETURN TRUE
+END HostName;
+
 (* The capsule c names, by its name or an alias, or NIL. *)
 PROCEDURE (c: Config) Find*(host: ARRAY OF CHAR): Capsule;
   VAR i, j: INTEGER; k: Capsule;
@@ -179,9 +196,8 @@ PROCEDURE (c: Config) Add*(name: ARRAY OF CHAR; first: BOOLEAN;
     VAR k: Capsule; VAR why: ARRAY OF CHAR): BOOLEAN;
   VAR i: INTEGER; n: Name;
 BEGIN
-  COPY(name, n); Lower(n);
   IF c.n = MaxCapsules THEN COPY("too many capsules", why); RETURN FALSE END;
-  IF (n # "") & ~ValidName(n) THEN COPY("not a host name: ", why); Strings.Append(name, why); RETURN FALSE END;
+  IF name = "" THEN n := "" ELSIF ~HostName(name, n, why) THEN RETURN FALSE END;
   IF c.Find(n) # NIL THEN COPY("a second capsule for ", why); Strings.Append(n, why); RETURN FALSE END;
   NEW(k); k.name := n; k.nAliases := 0; k.root := ""; k.cert := ""; k.key := ""; k.nAreas := 0;
   k.listings := FALSE;
@@ -199,10 +215,9 @@ PROCEDURE (c: Config) AddAlias*(k: Capsule; alias: ARRAY OF CHAR;
     VAR why: ARRAY OF CHAR): BOOLEAN;
   VAR n: Name;
 BEGIN
-  COPY(alias, n); Lower(n);
   IF k.name = "" THEN COPY("a capsule for any host has no aliases", why); RETURN FALSE END;
   IF k.nAliases = MaxAliases THEN COPY("too many aliases", why); RETURN FALSE END;
-  IF ~ValidName(n) THEN COPY("not a host name: ", why); Strings.Append(alias, why); RETURN FALSE END;
+  IF ~HostName(alias, n, why) THEN RETURN FALSE END;
   IF c.Find(n) # NIL THEN COPY("a second capsule for ", why); Strings.Append(n, why); RETURN FALSE END;
   k.aliases[k.nAliases] := n; INC(k.nAliases);
   RETURN TRUE
