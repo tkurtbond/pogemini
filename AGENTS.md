@@ -53,7 +53,9 @@ pounix's `UnixFiles.OpenDirectory` (pounix Phase 8, so pounix must be
 that new): PLAN.md, "Directory listings". Since 2026-11-18 `GemCert`
 makes certificates through polibtls's `TlsMake`, so pogemini needs no
 `openssl` at run time, only its tests do (PLAN.md, "Certificates
-through TlsMake"; polibtls d935372 or later).
+through TlsMake"; polibtls d935372 or later), and makes a new
+certificate directory its owner's only with pounix's
+`UnixFiles.ChangeMode` (pounix Phase 11, so pounix must be that new).
 
 **poc 0.14.0 or later** (`StopRequests`), **and pounix, polibtls,
 posockets and poDateTime built by the same poc.** A poc library works

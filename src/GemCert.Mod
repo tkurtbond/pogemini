@@ -5,7 +5,10 @@ MODULE GemCert; (* A self-signed certificate for a capsule given none *)
    clients pin the certificate they first see (TOFU): a new one at
    every start would look like an attack. It is kept in the
    certificate directory as <name>.crt and <name>.key, the key readable
-   by its owner only, and is used as it is from then on.
+   by its owner only, and is used as it is from then on. A certificate
+   directory made here is its owner's only (700 octal), as the umask
+   077 the openssl script ran under made it; one that exists is left as
+   it is, since whoever made it chose its mode.
 
    The pair is ECDSA P-256, signed with SHA-256, for the capsule's name
    and aliases (subject alternative names, which libtls matches SNI
@@ -16,10 +19,12 @@ MODULE GemCert; (* A self-signed certificate for a capsule given none *)
    an interrupted run left, or a key the user put there, and is given
    its certificate; a .crt alone is refused, never replaced. *)
 
-IMPORT Platform, Strings, Directories, Instants, Clocks, Tls, TlsMake, GemConfig;
+IMPORT Platform, Strings, Directories, Instants, Clocks, UnixErrors, UnixFiles, Tls, TlsMake,
+  GemConfig;
 
 CONST
   Days = 3650;   (* how long a certificate made here is valid *)
+  DirMode = 1C0H;   (* a certificate directory made here: 700 octal *)
 
 (* The directory certificates are kept in by default:
    $XDG_DATA_HOME/pogemini/certs, or $HOME/.local/share/pogemini/certs.
@@ -51,7 +56,7 @@ END Join;
    key. FALSE, with why, if the pair can't be had. *)
 PROCEDURE Ensure*(dir: ARRAY OF CHAR; k: GemConfig.Capsule; VAR why: ARRAY OF CHAR): BOOLEAN;
   VAR crt, key: GemConfig.Path; names: ARRAY 5000 OF CHAR; i: INTEGER;
-    t: Instants.Instant; now: HUGEINT; error: Tls.String;
+    t: Instants.Instant; now: HUGEINT; error: Tls.String; err: UnixErrors.Error;
 BEGIN
   ASSERT((k.name # "") & (k.cert = "") & (k.key = ""), 105);
   IF dir = "" THEN COPY("no directory for certificates", why); RETURN FALSE END;
@@ -69,8 +74,13 @@ BEGIN
   COPY(k.name, names);
   FOR i := 0 TO k.nAliases - 1 DO Strings.Append(" ", names); Strings.Append(k.aliases[i], names) END;
   IF Strings.Length(names) >= LEN(names) - 1 THEN COPY("too many names for a certificate", why); RETURN FALSE END;
-  IF ~Directories.MakeDirectory(dir) THEN
-    COPY("can't make the certificate directory ", why); Strings.Append(dir, why); RETURN FALSE
+  IF ~Exists(dir) THEN
+    (* MakeDirectory gives the umask's mode, and makes any parents with
+       it too: only dir itself is made private. *)
+    IF ~Directories.MakeDirectory(dir) THEN
+      COPY("can't make the certificate directory ", why); Strings.Append(dir, why); RETURN FALSE
+    END;
+    IF ~UnixFiles.ChangeMode(dir, DirMode, err) THEN COPY(err.text, why); RETURN FALSE END
   END;
   IF ~Exists(key) & ~TlsMake.EcKey(key, error) THEN COPY(error^, why); RETURN FALSE END;
   Clocks.Now(t); now := Instants.UnixSeconds(t);

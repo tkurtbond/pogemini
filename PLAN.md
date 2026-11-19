@@ -777,7 +777,14 @@ CA:FALSE, critical.
 - **The directory** is made by the runtime's
   `Directories.MakeDirectory`, with its parents, mode 0777 less the
   umask, not 0700 as `umask 077` made it: the key's own mode is what
-  keeps it private.
+  keeps it private. That was so at first; since pounix's Phase 11
+  (2026-11-18), `UnixFiles.ChangeMode` makes the certificate directory
+  0700 when GemCert made it, as before, so no one else can list which
+  capsules have keys. Its parents keep the umask's mode, and a
+  directory that was there is left as it is, since whoever made it
+  chose its mode (TestCapsules: `drwx------` for the two made, a
+  `chmod 755` directory unchanged; the made ones failed when GemCert set
+  755).
 - **Errors** are TlsMake's own (a CN over 64 characters, an encrypted
   or unreadable key, a directory that can't be written), and
   "can't make the certificate directory <dir>".

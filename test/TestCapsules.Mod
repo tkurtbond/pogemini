@@ -226,6 +226,8 @@ BEGIN
   Check.Check(Run("ls -l ../build/test-capsules/certs/gen.example.key") = 0, "  ... gen.example's key kept");
   Check.Check(StartsWith(got, "-rw------- ") OR StartsWith(got, "-rw-------."),
     "  ... readable by its owner only");
+  Check.Check((Run("ls -ld ../build/test-capsules/certs") = 0) & StartsWith(got, "drwx------"),
+    "  ... in a directory made its owner's only");
   Check.Check(Run("openssl x509 -in ../build/test-capsules/certs/gen.example.crt -noout -text") = 0,
     "  ... beside a certificate openssl reads");
   Check.Check(Check.Contains(got, "DNS:gen.example") & Check.Contains(got, "ecdsa-with-SHA256"),
@@ -257,15 +259,19 @@ BEGIN
   Check.Check(Run("openssl x509 -in ../build/test-capsules/certs2/deeper/b.example.crt -noout -text") = 0,
     "  ... the certificate made, in a directory made with its parent");
   Check.Check(Check.Contains(got, "DNS:b.example"), "  ... for b.example");
+  Check.Check((Run("ls -ld ../build/test-capsules/certs2/deeper") = 0) & StartsWith(got, "drwx------"),
+    "  ... the directory its owner's only");
   Refused("a certificate directory that can't be made",
     "-host c.example -certdir ../build/test-capsules/pogemini.conf/certs", 1,
     "pogemini: c.example: can't make the certificate directory ../build/test-capsules/pogemini.conf/certs");
-  IF Platform.System("mkdir -p ../build/test-capsules/certs3 && cp ../build/certs/self-ec.key ../build/test-capsules/certs3/d.example.key") # 0 THEN END;
+  IF Platform.System("mkdir -p ../build/test-capsules/certs3 && chmod 755 ../build/test-capsules/certs3 && cp ../build/certs/self-ec.key ../build/test-capsules/certs3/d.example.key") # 0 THEN END;
   Refused("a key alone: given a certificate, then the root refused",
     "-host d.example -certdir ../build/test-capsules/certs3 -root ../build/test-capsules/pogemini.conf", 1,
     "pogemini: d.example: ../build/test-capsules/pogemini.conf is not a directory");
   Check.Check(Run("cd ../build/test-capsules/certs3 && openssl x509 -in d.example.crt -noout -pubkey > c.pub && openssl pkey -in ../../certs/self-ec.key -pubout > k.pub && cmp c.pub k.pub && cmp d.example.key ../../certs/self-ec.key") = 0,
     "  ... the certificate is for that key, and the key is unchanged");
+  Check.Check((Run("ls -ld ../build/test-capsules/certs3") = 0) & StartsWith(got, "drwxr-xr-x"),
+    "  ... and the directory that was there keeps its mode");
   Refused("no capsule", "", 2, "usage: pogemini");
   Refused("the key pair of another", "-host localhost -cert ../build/certs/self-ec.crt -key ../build/certs/self-rsa.key", 1,
     "pogemini: certificate: ");
