@@ -19,12 +19,12 @@ MODULE GemAccess; (* Paths that need a client certificate *)
    links are resolved, so a link can't lead into a require from outside
    it. A hard link can: whoever makes one could copy the file as well. *)
 
-IMPORT Instants, Clocks, GemServer, GemConfig;
+IMPORT Instants, Clocks, GeminiServer, GemConfig;
 
 (* 0 if x may have path, in capsule k; if not, the status that refuses
    it, with its meta, and x is left as it was, as for a directory's
    listing, which leaves out what x may not have (GemFiles). *)
-PROCEDURE Refusal*(x: GemServer.Exchange; k: GemConfig.Capsule; path: ARRAY OF CHAR;
+PROCEDURE Refusal*(x: GeminiServer.Exchange; k: GemConfig.Capsule; path: ARRAY OF CHAR;
     VAR meta: ARRAY OF CHAR): INTEGER;
   VAR i, j: INTEGER; a: GemConfig.Area; t: Instants.Instant; now: HUGEINT;
 BEGIN
@@ -47,7 +47,7 @@ BEGIN
 END Refusal;
 
 (* Whether x may have path, in capsule k; if not, x has its header. *)
-PROCEDURE Allowed*(x: GemServer.Exchange; k: GemConfig.Capsule; path: ARRAY OF CHAR): BOOLEAN;
+PROCEDURE Allowed*(x: GeminiServer.Exchange; k: GemConfig.Capsule; path: ARRAY OF CHAR): BOOLEAN;
   VAR meta: ARRAY 64 OF CHAR; status: INTEGER;
 BEGIN
   status := Refusal(x, k, path, meta);

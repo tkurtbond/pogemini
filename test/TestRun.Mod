@@ -87,7 +87,7 @@ END Timed;
 PROCEDURE Start(args: ARRAY OF CHAR): BOOLEAN;
   VAR cmd: Text; line: ARRAY 64 OF CHAR; i, n: LONGINT;
 BEGIN
-  cmd := "exec ../build/pogemini -port 0 -cert "; Append(cmd, Certs); Append(cmd, "self-ec.crt -key ");
+  cmd := "exec $POGEMINI_UNDER ../build/pogemini -port 0 -cert "; Append(cmd, Certs); Append(cmd, "self-ec.crt -key ");
   Append(cmd, Certs); Append(cmd, "self-ec.key "); Append(cmd, args);
   IF ~Child.Spawn(cmd, "", 0, server) OR ~Child.ReadLine(server, line, 15000) OR (line[0] # "p") THEN
     Check.Check(FALSE, "the server starts and says its port");
@@ -203,13 +203,13 @@ BEGIN
   END;
 
   IF UnixUsers.Root() THEN
-    status := Run("exec ../build/pogemini -port 0 -n 1 -cert ../build/certs/self-ec.crt -key ../build/certs/self-ec.key");
+    status := Run("exec $POGEMINI_UNDER ../build/pogemini -port 0 -n 1 -cert ../build/certs/self-ec.crt -key ../build/certs/self-ec.key");
     Check.Check((status = 1) & Check.Contains(got, "started as root: give -user"),
       "as root without -user: refuses to start");
     Check.Skip("-user root, not root: refused")
   ELSE
     Check.Skip("as root without -user: refuses to start");
-    status := Run("exec ../build/pogemini -port 0 -n 1 -user root -cert ../build/certs/self-ec.crt -key ../build/certs/self-ec.key");
+    status := Run("exec $POGEMINI_UNDER ../build/pogemini -port 0 -n 1 -user root -cert ../build/certs/self-ec.crt -key ../build/certs/self-ec.key");
     Check.Check((status = 1) & Check.Contains(got, "pogemini: become root: only root can become another user"),
       "-user root, not root: refused");
     IF (status # 1) THEN Out.String(got) END;
@@ -220,7 +220,7 @@ BEGIN
       Check.Check(Child.Wait(server, log, n) = 0, "  ... and exits 0")
     END
   END;
-  status := Run("exec ../build/pogemini -port 0 -n 1 -user no-such-user-pogemini -cert ../build/certs/self-ec.crt -key ../build/certs/self-ec.key");
+  status := Run("exec $POGEMINI_UNDER ../build/pogemini -port 0 -n 1 -user no-such-user-pogemini -cert ../build/certs/self-ec.crt -key ../build/certs/self-ec.key");
   Check.Check((status = 1) & Check.Contains(got, "pogemini: become no-such-user-pogemini: no such user"),
     "-user, an unknown user: refused");
   Check.Summary

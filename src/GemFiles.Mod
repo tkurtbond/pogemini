@@ -53,7 +53,8 @@ MODULE GemFiles; (* A capsule's files, served *)
    through, what was sent is all the client gets, ended as if complete:
    Gemini has no way to say otherwise. *)
 
-IMPORT Strings, UnixErrors, UnixFiles, GemServer, GemRequest, GemConfig, GemAccess;
+IMPORT Strings, UnixErrors, UnixFiles, GeminiUrls, GeminiHeaders, GeminiTextWriter,
+  GeminiServer, GemConfig, GemAccess;
 
 CONST
   Piece* = 16384;  (* bytes read and sent at a time *)
@@ -76,12 +77,18 @@ TYPE
     next: Entry
   END;
 
-  (* A listing's text, gathered into pieces, since each write to the
-     connection is a TLS record of its own *)
-  Page = RECORD
-    x: GemServer.Exchange;
+  (* A listing's gemtext, written by GeminiTextWriter, which refuses a
+     line that would read back as another, and gathered into pieces,
+     since each write to the connection is a TLS record of its own (a
+     GeminiServer.Writer writes each part of a line as it comes). url
+     and label hold an entry's link, off the task's stack. *)
+  Page = POINTER TO PageDesc;
+  PageDesc = RECORD (GeminiTextWriter.WriterDesc)
+    x: GeminiServer.Exchange;
     buf: Buffer;
-    n: LONGINT
+    n: LONGINT;
+    url: ARRAY 3 * UnixFiles.NameLen + 2 OF CHAR;
+    label: ARRAY UnixFiles.NameLen + 2 OF CHAR
   END;
 
 (* path with every symbolic link, "." and ".." resolved, in real: FALSE
@@ -141,7 +148,7 @@ BEGIN
   END
 END Type;
 
-(* Whether path has a segment beginning with ".". GemRequest has
+(* Whether path has a segment beginning with ".". CheckRequest has
    resolved "." and "..", so any such segment is a hidden name. *)
 PROCEDURE Hidden(path: ARRAY OF CHAR): BOOLEAN;
   VAR i: LONGINT;
@@ -213,7 +220,7 @@ BEGIN
 END OpenResolved;
 
 (* Sends the regular file open on fd, of type, and closes fd. *)
-PROCEDURE Send(x: GemServer.Exchange; fd: LONGINT; type: ARRAY OF CHAR);
+PROCEDURE Send(x: GeminiServer.Exchange; fd: LONGINT; type: ARRAY OF CHAR);
   VAR buf: Buffer; n: LONGINT; err: UnixErrors.Error;
 BEGIN
   IF x.Header(20, type) THEN
@@ -241,7 +248,7 @@ END Relative;
 (* Opens path, under root, as OpenResolved, and, for a file or a directory,
    checks that x may have it, by the path it really has: if not, x has
    its header, and the result is -1 and kind Missing. *)
-PROCEDURE Open(x: GemServer.Exchange; k: GemConfig.Capsule; path: ARRAY OF CHAR;
+PROCEDURE Open(x: GeminiServer.Exchange; k: GemConfig.Capsule; path: ARRAY OF CHAR;
     VAR kind: INTEGER): LONGINT;
   VAR real, rel: ARRAY PathLen OF CHAR; fd: LONGINT;
 BEGIN
@@ -256,40 +263,44 @@ BEGIN
   RETURN fd
 END Open;
 
-(* Adds s to p, sending what p holds first if s wouldn't fit. *)
-PROCEDURE Add(VAR p: Page; s: ARRAY OF CHAR);
-  VAR i, n: LONGINT;
+(* Sends what p holds; FALSE if the write failed. *)
+PROCEDURE (p: Page) Flush(): BOOLEAN;
+  VAR ok: BOOLEAN;
 BEGIN
-  n := Strings.Length(s);
-  IF p.n + n > Piece THEN
-    IF p.x.Write(p.buf^, 0, p.n) THEN END; p.n := 0
-  END;
-  i := 0; WHILE i < n DO p.buf[p.n] := s[i]; INC(p.n); INC(i) END
-END Add;
+  ok := (p.n = 0) OR p.x.Write(p.buf^, 0, p.n); p.n := 0;
+  RETURN ok
+END Flush;
 
-(* Adds name to p percent-encoded, every byte but a letter, a digit and
-   "-._~", RFC 3986's unreserved, so the link is a relative path
-   whatever the name holds: "a:b" a name, not a scheme, "a?b" not a
-   query. *)
-PROCEDURE AddEncoded(VAR p: Page; VAR name: ARRAY OF CHAR);
-  VAR i, j: LONGINT; c: CHAR; s: ARRAY 3 * UnixFiles.NameLen + 1 OF CHAR;
-    hex: ARRAY 17 OF CHAR;
+(* Adds s[0..n-1] to p, sending what p holds first if it wouldn't fit;
+   FALSE if a write failed. *)
+PROCEDURE (p: Page) Put*(s-: ARRAY OF CHAR; n: LONGINT): BOOLEAN;
+  VAR i: LONGINT;
 BEGIN
-  hex := "0123456789ABCDEF";
-  i := 0; j := 0;
-  WHILE name[i] # 0X DO
-    c := name[i];
-    IF (c >= "a") & (c <= "z") OR (c >= "A") & (c <= "Z") OR (c >= "0") & (c <= "9")
-      OR (c = "-") OR (c = ".") OR (c = "_") OR (c = "~") THEN
-      s[j] := c; INC(j)
-    ELSE
-      s[j] := "%"; s[j + 1] := hex[ORD(c) DIV 16]; s[j + 2] := hex[ORD(c) MOD 16]; INC(j, 3)
-    END;
-    INC(i)
+  IF (p.n + n > Piece) & ~p.Flush() THEN RETURN FALSE END;
+  IF n > Piece THEN RETURN p.x.Write(s, 0, n) END;
+  i := 0; WHILE i < n DO p.buf[p.n] := s[i]; INC(p.n); INC(i) END;
+  RETURN TRUE
+END Put;
+
+(* A link to e, percent-encoded, every byte but a letter, a digit and
+   "-._~", RFC 3986's unreserved (GeminiUrls.Encode), so the link is a
+   relative path whatever the name holds: "a:b" a name, not a scheme,
+   "a?b" not a query. A directory's has "/" after it. A name beginning
+   with whitespace, which a reader drops from a label, is linked with
+   no label, so the reader shows the URL, which keeps it. FALSE only if
+   a write failed. *)
+PROCEDURE AddEntry(p: Page; e: Entry): BOOLEAN;
+  VAR why: ARRAY 128 OF CHAR;
+BEGIN
+  IF GeminiUrls.Encode(e.name^, p.url) THEN
+    COPY(e.name^, p.label);
+    IF e.dir THEN Strings.Append("/", p.url); Strings.Append("/", p.label) END;
+    IF ~GeminiTextWriter.Link(p, p.url, p.label, why) & ~p.x.failed THEN
+      IF GeminiTextWriter.Link(p, p.url, "", why) THEN END
+    END
   END;
-  s[j] := 0X;
-  Add(p, s)
-END AddEncoded;
+  RETURN ~p.x.failed
+END AddEntry;
 
 (* Whether a comes before b in a listing: directories first, then by
    the bytes of the names. *)
@@ -331,16 +342,17 @@ BEGIN
     IF (name[i] < 20X) OR (name[i] = 7FX) THEN RETURN FALSE END;
     INC(i)
   END;
-  RETURN GemRequest.Utf8(name, i)
+  RETURN GeminiUrls.Utf8(name, i)
 END Showable;
 
 (* Answers r with a listing of dir, the directory r names, which x may
    have (Serve). *)
-PROCEDURE List(x: GemServer.Exchange; k: GemConfig.Capsule; VAR dir: ARRAY OF CHAR;
-    VAR r: GemRequest.Request);
+PROCEDURE List(x: GeminiServer.Exchange; k: GemConfig.Capsule; VAR dir: ARRAY OF CHAR;
+    VAR r: GeminiUrls.Request);
   VAR real, path, ereal, rel: PathBuf; d: UnixFiles.Directory; err: UnixErrors.Error;
     name: ARRAY UnixFiles.NameLen OF CHAR; meta: ARRAY 64 OF CHAR;
-    list, e: Entry; n, fd, len: LONGINT; kind: INTEGER; more: BOOLEAN; p: Page;
+    list, e: Entry; n, fd, len: LONGINT; kind: INTEGER; more, ok: BOOLEAN; p: Page;
+    why: ARRAY 128 OF CHAR;
 BEGIN
   NEW(real); NEW(path); NEW(ereal); NEW(rel);
   fd := OpenResolved(k.root, dir, kind, real^);
@@ -382,27 +394,25 @@ BEGIN
   list := Sort(list, n);
 
   IF ~x.Header(20, "text/gemini") THEN RETURN END;
-  p.x := x; NEW(p.buf); p.n := 0;
-  Add(p, "# "); Add(p, r.path); Add(p, 0AX); Add(p, 0AX);
-  IF r.path # "/" THEN Add(p, "=> ../ ../"); Add(p, 0AX) END;
+  NEW(p); GeminiTextWriter.Init(p); p.x := x; NEW(p.buf); p.n := 0;
+  (* The path is CheckRequest's, which has no control character and
+     begins with "/", so its heading is never refused; nor is any line
+     here but an entry's, which AddEntry sees to. *)
+  ok := GeminiTextWriter.Heading(p, 1, r.path, why) & GeminiTextWriter.Text(p, "", why);
+  IF ok & (r.path # "/") THEN ok := GeminiTextWriter.Link(p, "../", "../", why) END;
   e := list;
-  WHILE e # NIL DO
-    Add(p, "=> "); AddEncoded(p, e.name^);
-    IF e.dir THEN Add(p, "/") END;
-    Add(p, " "); Add(p, e.name^);
-    IF e.dir THEN Add(p, "/") END;
-    Add(p, 0AX);
-    e := e.next
+  WHILE ok & (e # NIL) DO ok := AddEntry(p, e); e := e.next END;
+  IF ok & more THEN
+    ok := GeminiTextWriter.Text(p, "", why) & GeminiTextWriter.Text(p, "More entries are not listed.", why)
   END;
-  IF more THEN Add(p, 0AX); Add(p, "More entries are not listed."); Add(p, 0AX) END;
-  IF (p.n > 0) & x.Write(p.buf^, 0, p.n) THEN END
+  IF ok & p.Flush() THEN END
 END List;
 
 (* Answers r, a request for a file of capsule k, whose root is one
    Resolve gave. *)
-PROCEDURE Serve*(x: GemServer.Exchange; k: GemConfig.Capsule; VAR r: GemRequest.Request);
+PROCEDURE Serve*(x: GeminiServer.Exchange; k: GemConfig.Capsule; VAR r: GeminiUrls.Request);
   VAR path: ARRAY PathLen OF CHAR; type: ARRAY 64 OF CHAR;
-    meta: ARRAY GemServer.MaxMeta + 1 OF CHAR;
+    meta: ARRAY GeminiHeaders.MaxMeta + 1 OF CHAR;
     kind: INTEGER; fd, n, dirLen: LONGINT;
 BEGIN
   IF Hidden(r.path) OR (Strings.Length(k.root) + Strings.Length(r.path) + 16 >= PathLen) THEN
@@ -415,7 +425,7 @@ BEGIN
     n := Strings.Length(r.path);
     IF r.path[n - 1] # "/" THEN
       (* the path as sent, with "/" added, relative to the request *)
-      IF Strings.Length(r.rawPath) + 2 + Strings.Length(r.query) > GemServer.MaxMeta THEN
+      IF Strings.Length(r.rawPath) + 2 + Strings.Length(r.query) > GeminiHeaders.MaxMeta THEN
         IF x.Header(51, "not found") THEN END; RETURN
       END;
       COPY(r.rawPath, meta); Strings.Append("/", meta);

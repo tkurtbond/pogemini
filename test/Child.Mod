@@ -4,7 +4,11 @@ MODULE Child; (* A command run as a child process, for the tests *)
    the tests see what a user sees: its exit status, and its log on
    standard output. Through pounix's UnixProcesses, with UnixFiles'
    WaitReadable for ReadLine's time limit. Spawn, Wait and ReadLine wait
-   in the kernel and so stop every task: call them outside tasks. *)
+   in the kernel and so stop every task: call them outside tasks.
+
+   The tests start the server as "exec $POGEMINI_UNDER ../build/pogemini
+   ...": the variable is unset but in make valgrind, which sets it to a
+   valgrind command, so the server is checked as well as the test. *)
 
 IMPORT UnixErrors, UnixFiles, UnixProcesses;
 

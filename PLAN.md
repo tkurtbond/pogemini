@@ -133,6 +133,10 @@ Decided with the user, 2026-11-16:
   `-listen` (every address), `-deadline` ms and `-n count` (for the
   tests); its first line on standard output is `port <n>`.
 
+Since 2026-11-18 the engine is pogeminilib's `GeminiServer`, this
+structure moved there, and the log line is `pogemini.Log`'s
+("pogeminilib").
+
 ### Halt codes
 
 The poc runtime uses 10..20, and the po* libraries 61..99 (polibfyaml
@@ -141,12 +145,18 @@ this server that asserts a programmer's error uses 100..109:
 
 | Code | Module | Meaning |
 |---|---|---|
-| 100 | GemServer | `Header` with a status outside 10..69, or a second header |
-| 101 | GemServer | `Header` with meta over 1024 bytes |
-| 102 | GemServer | `Write` without a 2x header first |
-| 103 | GemServer | a `Responder` returned without a header |
-| 104 | GemServer | `Serve` before `Listen` |
+| ~~100~~ | ~~GemServer~~ | ~~`Header` with a status outside 10..69, or a second header~~ |
+| ~~101~~ | ~~GemServer~~ | ~~`Header` with meta over 1024 bytes~~ |
+| ~~102~~ | ~~GemServer~~ | ~~`Write` without a 2x header first~~ |
+| ~~103~~ | ~~GemServer~~ | ~~a `Responder` returned without a header~~ |
+| ~~104~~ | ~~GemServer~~ | ~~`Serve` before `Listen`~~ |
 | 105 | GemCert | `Ensure` for a capsule with no name, or with a certificate or key |
+
+100..104 went with `GemServer` (2026-11-18, "pogeminilib"), not to be
+reused: pogeminilib's `GeminiServer` halts with its own, 124 (a status
+the specification doesn't name), 125 (a meta it forbids), 130 (a second
+header), 131 (a body without 2x), 132 (a Responder without a header)
+and 133 (`Serve` before `Listen`).
 
 ## Testing
 
@@ -802,6 +812,85 @@ CA:FALSE, critical.
   times each; the skips only for clients a host lacks and for root),
   with pounix, poDateTime, posockets and polibtls (d935372) from their
   commits.
+
+### pogeminilib [done]
+
+Done 2026-11-18, pogeminilib's Phase 8, step 2: the engine and the
+request check moved to pogeminilib (its fa0a015) so that every Oberon
+Gemini server shares them, and pogemini now uses them from there.
+pogeminilib is in `DEPLIBS`, installed after pounix.
+
+- **The engine.** `GemServer` is gone; `pogemini` runs a
+  `GeminiServer.Server`, and `GemAccess` and `GemFiles` take a
+  `GeminiServer.Exchange`. The log line is unchanged: `pogemini.Log`, a
+  `GeminiServer` Logger, writes the five lines `GemServer` wrote, in the
+  same form, so nothing reading the log changes.
+- **The request.** `GemRequest` is gone; `Respond` checks a request
+  with `GeminiUrls.CheckRequest`, which is `GemRequest.Parse` carried
+  over, the long IPv6 literal's bound included. `TestParse` went with
+  it: its cases were already pogeminilib's `TestUrls`, all but the
+  255-byte literal (accepted) and the 256-byte one (refused), added
+  there.
+- **The listing** is written by `GeminiTextWriter` (heading, text,
+  links). `GeminiServer.Writer` writes each part of a line as it comes,
+  a TLS record each, so `GemFiles` has a writer of its own, `Page`,
+  which gathers lines into `Piece`-sized writes as `GemFiles` did
+  before. The page with no root is written the same way.
+- **A name beginning with whitespace** has no label: `GeminiTextWriter`
+  refuses a link label that begins with whitespace, since a reader
+  would strip it, so such an entry is listed as its URL alone
+  (`=> %20lead.gmi`), which still reaches it. `TestFiles` lists one.
+- **Halt codes 100..104** are retired with `GemServer` (the table, "Halt
+  codes"); `GeminiServer` halts with pogeminilib's 124, 125 and
+  130..133 for a Responder's misuse.
+- **Checked.** `make test` passed on Linux, 240 checks, each test's
+  count as before but for `TestParse`'s 85, gone. pogemini under
+  valgrind (by hand, before "make valgrind") served a listing,
+  a file, `index.gmi`, a 59 and a 53, with nothing lost and no error
+  but the two descriptors `Tasks` keeps open. `gmake test` passed on
+  alerik, artos, yishana, jherek and cymoril (237 to 239 checks, the
+  difference only the clients each has), with poDateTime, posockets,
+  polibtls and pounix from their commits and pogeminilib from its
+  working tree after fa0a015.
+
+### make valgrind [done]
+
+Done 2026-11-19: `make valgrind` runs each test under memcheck, as
+pogeminilib's does, and every pogemini the tests start as well, since
+that is what most of them test. The tests start the server as `exec
+$POGEMINI_UNDER ../build/pogemini` (`test/Child.Mod`); unset, as in
+`make test`, the variable is nothing, and the target sets it to valgrind
+with a log of its own per server, `build/vg/<test>-pogemini.<pid>.vg`.
+valgrind is given by its full path, since `TestCapsules` starts one
+pogemini with `PATH` set to nowhere. Each log, the tests' and the
+servers', is judged by pogeminilib's `test/vg-errors.sh`, `vg-fds.sh`
+and `vg-reachable.sh`, copied with `poc-gc.supp`: no error but a
+descriptor open at exit, every one of those inherited or Tasks' self-pipe,
+and nothing still reachable but the collector's, the loader's and
+OpenSSL's.
+
+Its first run, 36 logs, found two things:
+
+- **Listeners open at exit.** pogemini listens as root (for a port
+  below 1024), then becomes the user, and when that fails it exited with
+  its two listeners open, left to the kernel (`TestRun`'s `-user`
+  cases); `GemServer` did the same. pogeminilib's `GeminiServer` now
+  has `Close` (its PLAN.md, Phase 8), which pogemini calls before it
+  fails.
+- **OpenSSL's key encoders**, still reachable after TlsMake writes a
+  capsule's key, in the one pogemini `TestCapsules` starts with `PATH`
+  set to nowhere: valgrind fetches libcrypto's debug information by
+  running `debuginfod-find`, so there OpenSSL's own functions were
+  unnamed (3482 frames, none with `PATH` as usual, checked), and
+  `vg-reachable.sh` couldn't see the cache functions it allows. It now
+  allows a stack through `OSSL_ENCODER_CTX_new_for_pkey` too, which
+  libcrypto exports, as it allows the decoders'.
+
+Then `make valgrind` passed, 240 checks, 36 logs and none faulted;
+`make test` passed on Linux (240 checks) and `gmake test` on alerik,
+artos, yishana, jherek and cymoril (237 to 239 checks; pogeminilib's `gmake test`, 948, on each), with pogeminilib's
+`Close` from its working tree. valgrind is Linux's here, so the
+target is run on Linux.
 
 ## To do later
 

@@ -24,7 +24,8 @@ MODULE TestFiles; (* A capsule's files, served *)
    Then the same root with -listings (given last, the one option
    without a value), and /list/ in it require'd in part: a directory
    without index.gmi is listed, directories first, then by the bytes of
-   the names, each percent-encoded in its link, leaving out hidden
+   the names, each percent-encoded in its link (one beginning with a
+   space with no label, which a reader would drop it from), leaving out hidden
    names (a link to a file served among them), links out of the root
    or to a hidden name, a FIFO, a name
    with a control character or not UTF-8, and the require the client
@@ -201,7 +202,7 @@ PROCEDURE (t: Test) Run*;
 BEGIN
   IF t.run = 3 THEN
     Expect("/list/", "20 text/gemini",
-      "# /list/||=> ../ ../|=> adir/ adir/|=> dir2/ dir2/|=> Z.txt Z.txt|=> a%20b.gmi a b.gmi|=> a%3Ab a:b|=> b.gmi b.gmi|=> in.gmi in.gmi|=> %C3%A9t%C3%A9.gmi été.gmi|",
+      "# /list/||=> ../ ../|=> adir/ adir/|=> dir2/ dir2/|=> %20lead.gmi|=> Z.txt Z.txt|=> a%20b.gmi a b.gmi|=> a%3Ab a:b|=> b.gmi b.gmi|=> in.gmi in.gmi|=> %C3%A9t%C3%A9.gmi été.gmi|",
       "a listing: directories first, by bytes, encoded, leaving out what isn't served");
     Expect("/list/dir2/", "20 text/gemini", "# /list/dir2/||=> ../ ../|", "  ... an empty directory: only ../");
     Expect("/list", "31 /list/", "", "  ... without /: 31 still");
@@ -273,7 +274,7 @@ PROCEDURE Serve(args: ARRAY OF CHAR; count, run: INTEGER);
   VAR c: Child.Child; t: Test; cmd: Text; line: ARRAY 64 OF CHAR; log: ARRAY 65536 OF CHAR;
     i, n: LONGINT;
 BEGIN
-  cmd := "exec ../build/pogemini -port 0 -n "; IntToStr(count, line);
+  cmd := "exec $POGEMINI_UNDER ../build/pogemini -port 0 -n "; IntToStr(count, line);
   Append(cmd, line); Append(cmd, " "); Append(cmd, args);
   IF ~Child.Spawn(cmd, "", 0, c) OR ~Child.ReadLine(c, line, 15000) OR (line[0] # "p") THEN
     Check.Check(FALSE, "the server starts and says its port");
@@ -307,7 +308,7 @@ BEGIN
   Write("outside/out.txt", "outside|"); Write("outside/secret.txt", "outside|");
   Write("root/locked.gmi", "locked|");
   status := Platform.System("mkdir -p ../build/test-files/root/list/adir ../build/test-files/root/list/dir2 ../build/test-files/root/list/private ../build/test-files/root/list/.git ../build/test-files/root/many");
-  Write("root/list/adir/x.gmi", "x|"); Write("root/list/Z.txt", "Z|"); Write("root/list/a b.gmi", "ab|");
+  Write("root/list/adir/x.gmi", "x|"); Write("root/list/Z.txt", "Z|"); Write("root/list/ lead.gmi", "lead|"); Write("root/list/a b.gmi", "ab|");
   Write("root/list/a:b", "a:b|"); Write("root/list/b.gmi", "b|"); Write("root/list/été.gmi", "summer|");
   Write("root/list/.hidden", "hidden|"); Write("root/list/private/p.gmi", "private|");
   FOR i := 0 TO MaxEntries DO
@@ -330,7 +331,7 @@ BEGIN
   Serve("-host localhost -cert ../build/certs/self-ec.crt -key ../build/certs/self-ec.key", 2, 2);
   Serve("-host localhost -root ../build/test-files/rootlink -require /list/private -cert ../build/certs/self-ec.crt -key ../build/certs/self-ec.key -listings",
     Listed, 3);
-  Check.Check((Run("exec ../build/pogemini -host localhost -cert ../build/certs/self-ec.crt -key ../build/certs/self-ec.key -listings") = 1)
+  Check.Check((Run("exec $POGEMINI_UNDER ../build/pogemini -host localhost -cert ../build/certs/self-ec.crt -key ../build/certs/self-ec.key -listings") = 1)
     & Check.Contains(got, "pogemini: -listings: it needs -root"), "-listings without -root: refused, 1");
 
   IF Platform.System("chmod 644 ../build/test-files/root/locked.gmi && rm -rf ../build/test-files") # 0 THEN END;

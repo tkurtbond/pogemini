@@ -56,20 +56,29 @@ makes certificates through polibtls's `TlsMake`, so pogemini needs no
 through TlsMake"; polibtls d935372 or later), and makes a new
 certificate directory its owner's only with pounix's
 `UnixFiles.ChangeMode` (pounix Phase 11, so pounix must be that new).
+Since 2026-11-18 the engine, the request's check and the listing's
+writing are pogeminilib's (`~/Repos/Oberon/pogeminilib`, its Phase 8):
+`GemServer` is gone for `GeminiServer`, with pogemini's log line
+written by `pogemini.Log`; `GemRequest` for `GeminiUrls.CheckRequest`,
+whose tests, `TestParse`'s cases, are pogeminilib's `TestUrls`; and a
+listing is written through `GeminiTextWriter` (PLAN.md, "pogeminilib").
 
-**poc 0.14.0 or later** (`StopRequests`), **and pounix, polibtls,
-posockets and poDateTime built by the same poc.** A poc library works
+**poc 0.14.0 or later** (`StopRequests`), **and pogeminilib, pounix,
+polibtls, posockets and poDateTime built by the same poc.** A poc library works
 only with the poc that built it. All four were installed in
 `~/.local/lib/poc` with 0.14.0 on 2026-11-16 (pounix at 330d187,
 polibtls at cfb12e0, posockets at 08b6e48, poDateTime at 5ae9a47),
 each from a `git archive` of its commit by `make install`. After a poc
 upgrade, reinstall them the same way, poDateTime before polibtls and
-posockets, since they need it; `make deps` says whether they match.
+posockets, since they need it, and pogeminilib last, since it needs
+them all; `make deps` says whether they match. pogeminilib was installed
+there from its working tree on 2026-11-18, after its fa0a015.
 
 ## Reference material
 
 | What | Where |
 |---|---|
+| pogeminilib | `~/Repos/Oberon/pogeminilib`: `doc/GeminiServer.md`, `doc/GeminiUrls.md`, `doc/GeminiTextWriter.md` |
 | pounix | `~/Repos/Oberon/pounix`: `doc/UnixUsers.md`, `doc/UnixFiles.md`, `doc/UnixProcesses.md` |
 | polibtls | `~/Repos/Oberon/polibtls`: README.md (the user's guide), `doc/Tls.md`, `doc/TlsTasks.md` |
 | posockets | `~/Repos/Oberon/posockets`: its README and `doc/` |
@@ -82,9 +91,9 @@ posockets, since they need it; `make deps` says whether they match.
 ## Build
 
 `GNUmakefile`: `make` (checks the dependencies, then builds), `make
-deps`, `make test`, `make clean`, with `POC` from `PATH`, output under
-`build/`, `.NOTPARALLEL`, and `POC_LIBRARY_PATH` unexported. polibtls
-and posockets are taken from `POCLIBDIR` (`~/.local/lib/poc`). The
+deps`, `make test`, `make valgrind`, `make clean`, with `POC` from `PATH`, output under
+`build/`, `.NOTPARALLEL`, and `POC_LIBRARY_PATH` unexported. The
+libraries in `DEPLIBS` are taken from `POCLIBDIR` (`~/.local/lib/poc`). The
 integer size model is `-OC`, the one they are installed in. Add a
 program to `PROGS`, a test to `TESTS`. `make` also makes the tests'
 certificates (`test/make-certs.sh`, polibtls's) into `build/certs`.
@@ -109,7 +118,7 @@ after `Child.Wait`. `test/GemClient.Mod` is the client, in tasks, with a
 deadline of its own. A test task that passes a whole response by value
 needs a bigger stack than `TlsTasks.stackSize` (PLAN.md, Phase 1).
 Tests import `src/` modules (`-import-path ../src`), so a module can be
-tested on its own, as `TestParse` tests `GemRequest`. `TestRequests`
+tested on its own, as `TestConfig` tests `GemConfig`. `TestRequests`
 finds the other clients as polibtls's `TestGemini` does (`$OPENSSL`,
 `$LIBTLS_NC`, `$GEMGET`, `$GNUTLS_CLI`, else on `PATH`) and skips, saying
 so, a client it can't find. `GemClient.servername` is the SNI it sends
@@ -122,12 +131,20 @@ with `-cert`. A capsule without a root answers only `/`, with a page
 naming it, so tests that need no files give none. `GemClient`'s
 responses grow as they come, up to 16 MiB.
 
+`make valgrind` runs each test under memcheck, and each pogemini it
+starts too: the tests start the server as `exec $POGEMINI_UNDER
+../build/pogemini`, and the target sets `POGEMINI_UNDER` to a valgrind
+command, so a new test that starts the server must use it as well.
+Every log, in `build/vg`, is judged by `test/vg-errors.sh`,
+`vg-reachable.sh` and `vg-fds.sh`, pogeminilib's, as there (PLAN.md,
+"make valgrind"). Linux only, where valgrind is.
+
 ## Testing on the BSD hosts
 
 As polibtls's AGENTS.md says, and the same hosts (not rackhir without
 asking). Copy the working tree there (`tar` less `build/` and `.git`)
-into a directory under `~/tmp`, with pounix, poDateTime, posockets
-and polibtls from `git archive`s, each installed, in that order, by
+into a directory under `~/tmp`, with poDateTime, posockets, polibtls,
+pounix and pogeminilib from `git archive`s, each installed, in that order, by
 `gmake install POCLIBDIR=<dir>` there and
 used by `gmake test POCLIBDIR=<dir>`; remove it all when done. Judge a
 run by make's exit status, and count `assertion failed` and core files
@@ -169,6 +186,6 @@ As polibtls's, in short:
 - **Record decisions and findings in PLAN.md as they happen**, mark
   finished phases `[done]`, strike through decided open questions.
 - **Commit only when asked.** Commit messages are short and say why.
-- When the server needs something polibtls or posockets lacks, change
+- When the server needs something pogeminilib, polibtls or posockets lacks, change
   it there, with its tests, and reinstall it; don't work around it
   here.

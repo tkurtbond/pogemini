@@ -1,8 +1,8 @@
 # pogemini -- a Gemini server in Oberon-2 for poc, the Peaseblossom
-# Oberon Compiler, on polibtls and posockets. See AGENTS.md; adapted from
+# Oberon Compiler, on pogeminilib, polibtls and posockets. See AGENTS.md; adapted from
 # polibtls's GNUmakefile.
 #
-# polibtls and posockets are taken installed, from $(POCLIBDIR), and must
+# The libraries in DEPLIBS are taken installed, from $(POCLIBDIR), and must
 # have been built by the poc in use, since poc refuses a library another
 # poc built: make deps checks. poc writes each module's .sym, .ll and .o,
 # and the programs, into $(BUILD), so make must not build two at once.
@@ -38,16 +38,27 @@ unexport POC_LIBRARY_PATH
 
 BUILD := build
 
+# make valgrind: memcheck as pogeminilib's (its GNUmakefile and
+# test/vg-*.sh, copied). --track-fds=yes lists the descriptors open at
+# exit, and valgrind counts each as an error, Tasks' self-pipe included,
+# so test/vg-errors.sh judges the errors rather than --error-exitcode.
+# 60 callers let vg-reachable.sh see tls_init in a stack. Paths are
+# absolute since the tests run from test/ and start pogemini from there.
+VALGRIND ?= valgrind
+VGFLAGS = --num-callers=60 --leak-check=full --show-leak-kinds=all --track-fds=yes --suppressions=$(abspath test/poc-gc.supp)
+VGDIR := $(BUILD)/vg
+
 # poc's version and target, as a library's manifest records them.
 POCVERSION := $(shell $(POC) -version | sed -n '1s/^poc \([^ ]*\).*/\1/p')
 TRIPLE := $(shell $(POC) -version | sed -n 's/^target \([^ ]*\).*/\1/p')
-# The installed libraries this needs.
-DEPLIBS := pounix polibtls posockets podatetime
+# The installed libraries this needs: pogeminilib for the engine
+# (GeminiServer), requests (GeminiUrls) and listings (GeminiTextWriter).
+DEPLIBS := pogeminilib pounix polibtls posockets podatetime
 
 # Programs (src/<name>.Mod, each a main module).
 PROGS := pogemini
 # Test programs (test/<name>.Mod, each a main module), run from test/.
-TESTS := TestParse TestConfig TestServe TestRequests TestCapsules TestFiles TestCerts TestRun
+TESTS := TestConfig TestServe TestRequests TestCapsules TestFiles TestCerts TestRun
 
 # Any module may be imported by any program, so each is rebuilt when one
 # changes; poc itself recompiles only what it must.
@@ -57,7 +68,7 @@ TESTMODS := $(wildcard test/*.Mod test/*.c)
 PROGBINS := $(PROGS:%=$(BUILD)/%)
 TESTBINS := $(TESTS:%=$(BUILD)/%)
 
-.PHONY: all deps certs test clean install uninstall
+.PHONY: all deps certs test valgrind clean install uninstall
 .NOTPARALLEL:
 
 all: deps $(PROGBINS) $(TESTBINS) certs
@@ -91,6 +102,32 @@ test: all
 	@status=0; for t in $(TESTS); do \
 	  echo "== $$t"; (cd test && ../$(BUILD)/$$t < /dev/null) || status=1; \
 	done; exit $$status
+
+# Each test under valgrind, and every pogemini it starts: the tests run
+# "$$POGEMINI_UNDER ../build/pogemini" (test/Child.Mod), so each server
+# writes its own log, $(VGDIR)/<test>-pogemini.<pid>.vg. Besides
+# definite and indirect leaks, the only errors in a log may be
+# descriptors open at exit (test/vg-errors.sh); every still-reachable
+# block must be the collector's, the loader's or OpenSSL's
+# (test/vg-reachable.sh); and every descriptor open at exit must be
+# inherited or Tasks' self-pipe (test/vg-fds.sh). The valgrind command
+# is a full path, since TestCapsules starts one pogemini with PATH set
+# to nowhere.
+valgrind: all
+	@vg=$$(command -v $(VALGRIND)) || { echo "valgrind: no $(VALGRIND)"; exit 1; }; \
+	mkdir -p $(VGDIR); rm -f $(VGDIR)/*.vg; status=0; \
+	for t in $(TESTS); do \
+	  echo "== valgrind $$t"; \
+	  (cd test && POGEMINI_UNDER="$$vg $(VGFLAGS) --log-file=$(abspath $(VGDIR))/$$t-pogemini.%p.vg" \
+	    $$vg $(VGFLAGS) --log-file=$(abspath $(VGDIR))/$$t.vg ../$(BUILD)/$$t < /dev/null) || status=1; \
+	done; \
+	for l in $(VGDIR)/*.vg; do \
+	  test/vg-errors.sh $$l || { echo "FAIL - $$l: memory errors"; status=1; }; \
+	  test/vg-reachable.sh $$l || { echo "FAIL - $$l: still-reachable memory neither the collector's, the loader's nor OpenSSL's"; status=1; }; \
+	  test/vg-fds.sh $$l || { echo "FAIL - $$l: descriptors left open at exit"; status=1; }; \
+	done; \
+	echo "valgrind: $$(ls $(VGDIR) | wc -l | tr -d ' ') logs, from $(words $(TESTS)) tests and the servers they started"; \
+	exit $$status
 
 clean:
 	rm -rf $(BUILD)

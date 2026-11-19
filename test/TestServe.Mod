@@ -193,7 +193,7 @@ PROCEDURE Start(kind: ARRAY OF CHAR; count: INTEGER; VAR c: Child.Child;
   VAR cmd: ARRAY 512 OF CHAR; line: ARRAY 64 OF CHAR; n: ARRAY 8 OF CHAR;
     i: INTEGER; p: LONGINT;
 BEGIN
-  cmd := "exec ../build/pogemini -port 0 -deadline ";
+  cmd := "exec $POGEMINI_UNDER ../build/pogemini -port 0 -deadline ";
   n[0] := CHR(ORD("0") + Deadline DIV 1000); n[1] := "0"; n[2] := "0"; n[3] := "0"; n[4] := 0X;
   Append(cmd, n); Append(cmd, " -n ");
   n[0] := CHR(ORD("0") + count DIV 10); n[1] := CHR(ORD("0") + count MOD 10); n[2] := 0X;

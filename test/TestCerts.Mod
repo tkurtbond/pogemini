@@ -177,7 +177,7 @@ END Run;
 PROCEDURE Serve(args: ARRAY OF CHAR; count, run: INTEGER; VAR log: ARRAY OF CHAR);
   VAR c: Child.Child; t: Test; cmd: Text; line: ARRAY 64 OF CHAR; i, n: LONGINT;
 BEGIN
-  cmd := "exec ../build/pogemini -port 0 -n "; IntToStr(count, line);
+  cmd := "exec $POGEMINI_UNDER ../build/pogemini -port 0 -n "; IntToStr(count, line);
   Append(cmd, line); Append(cmd, " "); Append(cmd, args);
   log[0] := 0X;
   IF ~Child.Spawn(cmd, "", 0, c) OR ~Child.ReadLine(c, line, 15000) OR (line[0] # "p") THEN

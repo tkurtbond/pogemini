@@ -25,7 +25,7 @@ MODULE pogemini; (* A Gemini server *)
    address, IPv6 and IPv4). Its first line on standard output is
    "port <n>", the port it listens on, so a program that starts it on
    port 0 learns which the kernel chose; then a line per connection
-   (GemServer). Each connection has ms (default 10000) for the whole
+   (Log). Each connection has ms (default 10000) for the whole
    exchange, and n connections (default 256) are served at once at
    most. With count, it serves that many connections, waits for them to
    end, and exits 0, for the tests; without, it serves until SIGTERM or
@@ -40,7 +40,8 @@ MODULE pogemini; (* A Gemini server *)
    whoever really wants it. Not started as root, user may only name
    the user it is.
 
-   A request is checked by GemRequest, and answered by the capsule its
+   A request is checked by pogeminilib's GeminiUrls.CheckRequest, and
+   answered by the capsule its
    host names (by name or alias), or else by the one for any host. One
    that names none, or for a port other than the one listened on, is
    refused, 53: this server is no proxy.
@@ -50,8 +51,9 @@ MODULE pogemini; (* A Gemini server *)
    capsule with a root serves the files under it (GemFiles); one
    without answers "/" with a page naming it, and anything else 51. *)
 
-IMPORT Platform, Out, Err, Args, Strings, Directories, Sockets, Tls,
-  UnixErrors, UnixUsers, GemServer, GemRequest, GemConfig, GemCert, GemFiles, GemAccess;
+IMPORT Platform, Out, Err, Args, Strings, Directories, Clocks, Instants, TimeStrings,
+  Sockets, Tls, UnixErrors, UnixUsers, GeminiUrls, GeminiTextWriter, GeminiServer,
+  GemConfig, GemCert, GemFiles, GemAccess;
 
 VAR
   config: GemConfig.Config;
@@ -75,7 +77,7 @@ BEGIN
 END Fail;
 
 (* The capsule that serves r, or NIL if this server serves it not. *)
-PROCEDURE CapsuleFor(VAR r: GemRequest.Request): GemConfig.Capsule;
+PROCEDURE CapsuleFor(VAR r: GeminiUrls.Request): GemConfig.Capsule;
   VAR k: GemConfig.Capsule;
 BEGIN
   IF r.port # port THEN RETURN NIL END;
@@ -84,31 +86,95 @@ BEGIN
   RETURN k
 END CapsuleFor;
 
-PROCEDURE Respond(x: GemServer.Exchange);
-  VAR r: GemRequest.Request; why: ARRAY 128 OF CHAR; status: INTEGER;
+(* "/" of capsule k, which has no root. *)
+PROCEDURE Page(x: GeminiServer.Exchange; k: GemConfig.Capsule);
+  VAR w: GeminiServer.Writer; why: ARRAY 128 OF CHAR; line: ARRAY GemConfig.NameLen + 32 OF CHAR;
+BEGIN
+  IF k.name = "" THEN line := "This capsule serves any host."
+  ELSE line := "This capsule is "; Strings.Append(k.name, line); Strings.Append(".", line)
+  END;
+  IF x.Header(20, "text/gemini") THEN
+    w := GeminiServer.NewWriter(x);
+    IF GeminiTextWriter.Heading(w, 1, "pogemini", why) & GeminiTextWriter.Text(w, "", why)
+      & GeminiTextWriter.Text(w, line, why)
+      & GeminiTextWriter.Text(w, "It has no root, so it serves no files.", why) THEN
+    END
+  END
+END Page;
+
+PROCEDURE Respond(x: GeminiServer.Exchange);
+  VAR r: GeminiUrls.Request; why: ARRAY 128 OF CHAR; status: INTEGER;
     k: GemConfig.Capsule;
 BEGIN
-  status := GemRequest.Parse(x.request, r, why);
-  IF status # GemRequest.Ok THEN
+  status := GeminiUrls.CheckRequest(x.request, r, why);
+  IF status # GeminiUrls.Ok THEN
     IF x.Header(status, why) THEN END
   ELSE
     k := CapsuleFor(r);
     IF k = NIL THEN
-      IF x.Header(GemRequest.Refused, "not served here") THEN END
+      IF x.Header(GeminiUrls.Refused, "not served here") THEN END
     ELSIF ~GemAccess.Allowed(x, k, r.path) THEN  (* refused, with its header *)
     ELSIF k.root # "" THEN GemFiles.Serve(x, k, r)
     ELSIF r.path # "/" THEN
       IF x.Header(51, "not found") THEN END
-    ELSIF x.Header(20, "text/gemini") & x.WriteString("# pogemini") & x.WriteString(0AX)
-      & x.WriteString(0AX) THEN
-      IF k.name = "" THEN
-        IF x.WriteString("This capsule serves any host.") THEN END
-      ELSIF x.WriteString("This capsule is ") & x.WriteString(k.name) & x.WriteString(".") THEN
-      END;
-      IF x.WriteString(0AX) & x.WriteString("It has no root, so it serves no files.") & x.WriteString(0AX) THEN END
+    ELSE Page(x, k)
     END
   END
 END Respond;
+
+(* Writes s with its control characters as %XX. *)
+PROCEDURE OutEscaped(s-: ARRAY OF CHAR);
+  CONST hex = "0123456789ABCDEF";
+  VAR i: LONGINT; h: ARRAY 17 OF CHAR;
+BEGIN
+  h := hex; i := 0;
+  WHILE (i < LEN(s)) & (s[i] # 0X) DO
+    IF (s[i] < " ") OR (s[i] = 7FX) THEN
+      Out.Char("%"); Out.Char(h[ORD(s[i]) DIV 16]); Out.Char(h[ORD(s[i]) MOD 16])
+    ELSE Out.Char(s[i])
+    END;
+    INC(i)
+  END
+END OutEscaped;
+
+(* The log, a line on standard output for each connection and for the
+   stop, beginning with the time, UTC, in whole seconds (as
+   2026-11-16T12:34:56Z):
+
+     <time> <client address> <status> <request> <client certificate | ->
+     <time> <client address> failed: <why>
+     <time> accept failed: <why>
+     <time> stopping on signal <n>, connections in progress: <k>
+     <time> stopped
+
+   The request is written with its control characters as %XX, so a line
+   is always one line. The time is poDateTime's, which works the date
+   out itself: the C library's gmtime_r loads the UTC zone first, which
+   needs more stack than a task has on NetBSD and OpenBSD. Nothing here
+   waits, so lines never mix. *)
+PROCEDURE Log(s: GeminiServer.Server; event: INTEGER; x: GeminiServer.Exchange; why-: ARRAY OF CHAR);
+  VAR now: Instants.Instant; t: ARRAY 32 OF CHAR;
+BEGIN
+  Clocks.Now(now); TimeStrings.Instant(now, 0, t);
+  Out.String(t); Out.Char(" ");
+  CASE event OF
+  | GeminiServer.served:
+    Out.String(x.peer.host); Out.Char(" "); Out.Int(x.status, 0); Out.Char(" ");
+    IF x.request = "" THEN Out.Char("-") ELSE OutEscaped(x.request) END;
+    Out.Char(" ");
+    IF x.certHash = NIL THEN Out.Char("-") ELSE Out.String(x.certHash^) END
+  | GeminiServer.failed:
+    Out.String(x.peer.host); Out.String(" failed: "); Out.String(why)
+  | GeminiServer.acceptFailed:
+    Out.String("accept failed: "); Out.String(why)
+  | GeminiServer.stopping:
+    Out.String("stopping on signal "); Out.Int(s.signal, 0);
+    Out.String(", connections in progress: "); Out.Int(s.active, 0)
+  | GeminiServer.stopped:
+    Out.String("stopped")
+  END;
+  Out.Ln
+END Log;
 
 (* Makes ready the capsules of config: a certificate and key for each,
    made in certdir if need be, and the root checked. *)
@@ -168,7 +234,7 @@ PROCEDURE Main;
     hosts: ARRAY GemConfig.MaxAliases + 1 OF GemConfig.Name;
     requires: ARRAY GemConfig.MaxAreas OF GemConfig.Path;
     count, x: LONGINT; i, j, nHosts, nRequires: INTEGER; listings: BOOLEAN;
-    k: GemConfig.Capsule; a: GemConfig.Area; s: GemServer.Server; err: Sockets.Error;
+    k: GemConfig.Capsule; a: GemConfig.Area; s: GeminiServer.Server; err: Sockets.Error;
     uerr: UnixErrors.Error;
 BEGIN
   config := GemConfig.New();
@@ -236,17 +302,19 @@ BEGIN
   IF config.n = 0 THEN Usage END;
   IF config.port < 0 THEN config.port := GemConfig.DefaultPort END;
   IF config.deadline < 0 THEN config.deadline := GemConfig.DefaultDeadline END;
-  IF config.connections < 0 THEN config.connections := GemServer.DefaultLimit END;
+  IF config.connections < 0 THEN config.connections := GeminiServer.DefaultLimit END;
   IF (config.user = "") & UnixUsers.Root() THEN
     Fail("", "started as root: give -user, a user to serve files as (-user root to stay root)")
   END;
   IF (certdir = "") & ~GemCert.DefaultDir(certdir) THEN certdir := "" END;
 
   Prepare(certdir);
-  s := GemServer.New(Context(), Respond);
-  s.SetDeadline(config.deadline); s.SetLimit(config.connections);
+  s := GeminiServer.New(Context(), Respond);
+  s.SetLog(Log); s.SetDeadline(config.deadline); s.SetLimit(config.connections);
   IF ~s.Listen(config.listen, SHORT(config.port), err) THEN Fail("listen", err.text) END;
-  IF (config.user # "") & ~UnixUsers.Become(config.user, uerr) THEN Fail("", uerr.text) END;
+  (* Listening first, as root, for a port below 1024; the listeners are
+     closed before failing, not left to the kernel (make valgrind). *)
+  IF (config.user # "") & ~UnixUsers.Become(config.user, uerr) THEN s.Close; Fail("", uerr.text) END;
   port := s.port;
   Out.String("port "); Out.Int(s.port, 0); Out.Ln;
   s.Serve(count)

@@ -237,7 +237,7 @@ BEGIN
   IF gemget # "" THEN INC(others) END; IF gnutlsCli # "" THEN INC(others) END;
   count := Ours + others;
 
-  cmd := "exec ../build/pogemini -host localhost -host ::1 -port 0 -deadline 5000 -n ";
+  cmd := "exec $POGEMINI_UNDER ../build/pogemini -host localhost -host ::1 -port 0 -deadline 5000 -n ";
   line[0] := CHR(ORD("0") + count DIV 10); line[1] := CHR(ORD("0") + count MOD 10); line[2] := 0X;
   Append(cmd, line);
   Append(cmd, " -cert ../build/certs/self-ec.crt -key ../build/certs/self-ec.key");

@@ -154,7 +154,7 @@ PROCEDURE Serve(args: ARRAY OF CHAR; count, run: INTEGER);
   VAR c: Child.Child; t: Test; cmd: Text; line: ARRAY 64 OF CHAR; log: ARRAY 65536 OF CHAR;
     i, n: LONGINT;
 BEGIN
-  cmd := "exec ../build/pogemini -port 0 -n "; line[0] := CHR(ORD("0") + count); line[1] := 0X;
+  cmd := "exec $POGEMINI_UNDER ../build/pogemini -port 0 -n "; line[0] := CHR(ORD("0") + count); line[1] := 0X;
   Append(cmd, line); Append(cmd, " "); Append(cmd, args);
   IF ~Child.Spawn(cmd, "", 0, c) OR ~Child.ReadLine(c, line, 15000) OR (line[0] # "p") THEN
     Check.Check(FALSE, "the server starts and says its port");
@@ -181,7 +181,7 @@ END Serve;
 PROCEDURE RefusedWith(label, env, args: ARRAY OF CHAR; status: INTEGER; why: ARRAY OF CHAR);
   VAR cmd: Text; s: INTEGER; ok: BOOLEAN;
 BEGIN
-  cmd := "exec "; Append(cmd, env); Append(cmd, "../build/pogemini -port 0 -n 1 "); Append(cmd, args);
+  cmd := "exec "; Append(cmd, env); Append(cmd, "$POGEMINI_UNDER ../build/pogemini -port 0 -n 1 "); Append(cmd, args);
   s := Run(cmd);
   ok := (s = status) & Check.Contains(got, why);
   Check.Check(ok, label);
