@@ -65,7 +65,8 @@ honoured, for packaging, and `BINDIR`, `MANDIR` and `DOCDIR` can be set
 apart. `make uninstall`, with the same settings, removes it all.
 
 The tests need `openssl`. They use OpenBSD's `nc` (one linked with
-libtls), `gemget` and `gnutls-cli` as other clients if they are there,
+libtls), `gemget`, `gnutls-cli` and `gmni` (BearSSL) as other clients if
+they are there,
 and skip them, saying so, if not.
 
 ## A first capsule

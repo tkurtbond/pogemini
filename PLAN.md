@@ -953,6 +953,16 @@ assertion (skips as before: 2 to 4, for want of a peer). A parent
 directory that is a file gives "can't make the certificate directory",
 as before, since `Ensure` takes `ENOTDIR` as missing.
 
+### gmni as a client [done]
+
+2026-11-19: TestRequests also runs gmni (BearSSL, `~/local/rndbin/gmni`,
+`$GMNI`), so the server is tried on a TLS stack sharing no code with
+OpenSSL, LibreSSL, Go's or GnuTLS's. It trusts the server for the run
+(`-j once`) and is given `XDG_DATA_HOME="$PWD/../build/gmni-data"`:
+gmni segfaults on a relative one, and without one would read the user's
+own known hosts. `-4`, since gmni can't connect to a bracketed IPv6
+address (polibtls's PLAN.md, "gmni, on BearSSL").
+
 ## To do later
 
 From the listen backlog's change to 128 (83e75d5, "Open questions"),

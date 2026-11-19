@@ -19,7 +19,7 @@ As of 2026-11-16, Phases 0 to 7 of PLAN.md are done: `src/GemServer`
 and `src/pogemini` serve a page naming the capsule asked for, tested by
 `TestServe` with our own client; `src/GemRequest` parses and checks each
 request (`TestParse` on its own, `TestRequests` through the server, with
-openssl s_client, OpenBSD's nc, gemget and gnutls-cli as clients); and
+openssl s_client, OpenBSD's nc, gemget, gnutls-cli and gmni as clients); and
 `src/GemConfig` reads the configuration file and `src/GemCert` makes a
 self-signed certificate for a capsule given none (`TestConfig` on its
 own, `TestCapsules` through the server: SNI and hosts picking capsules,
@@ -88,7 +88,7 @@ there from its working tree on 2026-11-18, after its fa0a015.
 | poc | `/usr/bin/poc` (0.14.0 since 2026-11-16); its source `~/Repos/Oberon/Peaseblossom` (`doc/users-guide.md`, `doc/reference-guide.md`; `rtl/llvm/Tasks.Mod`, `rtl/llvm/StopRequests.Mod`) |
 | Oberon-2 report | `~/Reference/Computer/Languages/Oberon/Oberon2.pdf` |
 | Gemini protocol | `gemini://geminiprotocol.net/docs/protocol-specification.gmi` (https mirror: https://geminiprotocol.net/docs/protocol-specification.gmi) |
-| Clients to test against | `openssl s_client`; OpenBSD's `nc` as `/usr/bin/netcat`; gemget (`~/go/bin/gemget`); `gnutls-cli`. polibtls's `test/TestGemini.Mod` shows how to drive each |
+| Clients to test against | `openssl s_client`; OpenBSD's `nc` as `/usr/bin/netcat`; gemget (`~/go/bin/gemget`); `gnutls-cli`; gmni (BearSSL, `~/local/rndbin/gmni`; give it an absolute `XDG_DATA_HOME`). polibtls's `test/TestGemini.Mod` shows how to drive each |
 
 ## Build
 

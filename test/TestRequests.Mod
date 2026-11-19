@@ -10,11 +10,15 @@ MODULE TestRequests; (* Requests through the server: refused, and served to othe
 
    Then the clients other people use, each on a TLS stack of its own:
    openssl s_client (OpenSSL's or LibreSSL's), OpenBSD's nc (libtls),
-   gemget (Go) and gnutls-cli (GnuTLS), each run as a child process
+   gemget (Go), gnutls-cli (GnuTLS) and gmni (BearSSL), each run as a
+   child process
    with the request on its standard input or command line, must get the
    page. nc is the first of $LIBTLS_NC, netcat and nc that is linked
    with libtls; gemget is $GEMGET or gemget, gnutls-cli $GNUTLS_CLI or
-   gnutls-cli, openssl $OPENSSL or openssl, on PATH. Without one, its
+   gnutls-cli, gmni $GMNI or gmni, openssl $OPENSSL or openssl, on
+   PATH. gmni trusts the server for the one run (-j once), and is given
+   an XDG_DATA_HOME under build/, absolute, since it never ends on a
+   relative one, so it never reads the user's own. Without one, its
    check is skipped, saying so. A client that hangs is ended by the
    server's deadline, which closes the connection (timeout(1) isn't on
    every system).
@@ -39,7 +43,7 @@ VAR
   home: ARRAY 64 OF CHAR;     (* gemini://localhost:<port>/ *)
   portText: ARRAY 8 OF CHAR;  (* the server's port, in decimal *)
   got: ARRAY 65536 OF CHAR; gotLen: LONGINT;
-  openssl, nc, gemget, gnutlsCli: Text;  (* each "" for none *)
+  openssl, nc, gemget, gnutlsCli, gmni: Text;  (* each "" for none *)
 
 PROCEDURE Length(s: ARRAY OF CHAR): LONGINT;
   VAR n: LONGINT;
@@ -217,6 +221,11 @@ BEGIN
     Append(cmd, portText); Append(cmd, " localhost");
     Url("?gnutls", req); i := Length(req); req[i] := CR; req[i + 1] := LF; req[i + 2] := 0X;
     Client("gnutls-cli (GnuTLS): the page", cmd, req)
+  END;
+  IF gmni # "" THEN
+    cmd := 'XDG_DATA_HOME="$PWD/../build/gmni-data" exec '; Append(cmd, gmni);
+    Append(cmd, " -4 -j once -i "); Url("?gmni", url); Append(cmd, url);
+    Client("gmni (BearSSL): the page", cmd, "")
   END
 END Others;
 
@@ -232,9 +241,12 @@ BEGIN
   Found("gemget", gemget, "on PATH, or set GEMGET");
   Find('for n in "$GNUTLS_CLI" gnutls-cli; do command -v "$n" && exit 0; done; exit 1', gnutlsCli);
   Found("gnutls-cli", gnutlsCli, "install gnutls-utils, or set GNUTLS_CLI");
+  Find('for n in "$GMNI" gmni; do command -v "$n" && exit 0; done; exit 1', gmni);
+  Found("gmni", gmni, "on PATH, or set GMNI");
   others := 0;
   IF openssl # "" THEN INC(others) END; IF nc # "" THEN INC(others) END;
   IF gemget # "" THEN INC(others) END; IF gnutlsCli # "" THEN INC(others) END;
+  IF gmni # "" THEN INC(others) END;
   count := Ours + others;
 
   cmd := "exec $POGEMINI_UNDER ../build/pogemini -host localhost -host ::1 -port 0 -deadline 5000 -n ";
