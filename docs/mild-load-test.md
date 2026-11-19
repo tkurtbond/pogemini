@@ -69,9 +69,11 @@ arriving at once. The kernel caps the backlog: on Linux at
 `net.core.somaxconn`, 4096 here. On the BSD hosts (2026-11-18) the
 cap is 128, the backlog itself: `kern.ipc.soacceptqueue` on FreeBSD
 15.1 (alerik) and `kern.somaxconn` on OpenBSD 7.9 (jherek, cymoril).
-NetBSD 11.0 (artos, yishana) has no sysctl for it; its
-`<sys/socket.h>` gives `SOMAXCONN` as 128, but whether its kernel caps
-a larger backlog there was not checked.
+NetBSD 11 (artos, yishana) has no sysctl for it: its `solisten`
+(`sys/kern/uipc_socket.c`) takes the smaller of the backlog and the
+kernel variable `somaxconn`, set to `SOMAXCONN`, 128, and changed only
+by patching the kernel. So every host gives pogemini the 128 it asks
+for, and no more.
 
 ## Running it again
 

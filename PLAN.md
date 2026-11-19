@@ -895,7 +895,7 @@ target is run on Linux.
 ## To do later
 
 From the listen backlog's change to 128 (83e75d5, "Open questions"),
-the first two left until the BSD hosts were next running, and done
+the first two left until the BSD hosts were next running; all done
 2026-11-18:
 
 1. ~~**`gmake test` on every BSD host** with the backlog of 128 and the
@@ -908,11 +908,18 @@ the first two left until the BSD hosts were next running, and done
    `kern.somaxconn` on OpenBSD), so pogemini's 128 is used whole there;
    NetBSD has no sysctl, and its header's `SOMAXCONN` is 128. Recorded
    in `docs/mild-load-test.md`.
-3. **NetBSD's cap, from its source**: whether NetBSD 11.0's kernel
-   caps a listen backlog at `somaxconn` (`solisten` in
-   `sys/kern/uipc_socket.c`), and what sets that, read in the source at
-   `/usr/local/sw/src/OS/NetBSD/netbsd-11.0-src` on atla once it is
-   there; then recorded here and in `docs/mild-load-test.md`.
+3. ~~**NetBSD's cap, from its source**~~: 128, done 2026-11-18. In
+   the netbsd-11 branch's source (`/usr/local/sw/src/OS/NetBSD/netbsd-11.0-src`
+   on atla, 11.1_STABLE, a shallow clone of GitHub's mirror, which has
+   no release tags), `solisten` sets `so_qlimit = uimin(backlog,
+   somaxconn)` (`sys/kern/uipc_socket.c:670`), and `somaxconn` is
+   `SOMAXCONN`, 128, with no sysctl ("patchable (XXX sysctl)"). The
+   file is the same at `netbsd-11-0-RELEASE` (rev. 1.314, from
+   cvsweb.netbsd.org), and artos's `<sys/socket.h>` gives 128, so 11.0
+   on the hosts is the same. As on
+   FreeBSD and OpenBSD, pogemini's 128 is used whole, so nothing changes
+   and the BSD tests needn't run again. Recorded in
+   `docs/mild-load-test.md`.
 
 ## Open questions
 
