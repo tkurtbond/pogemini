@@ -44,13 +44,16 @@ signals are caught by poc's `StopRequests` and the log's time is
 poDateTime's, and `src/GemServer.c` is gone (PLAN.md, "StopRequests
 and poDateTime": Peaseblossom's "Ongoing library enhancements" 7,
 step 3). Since then pogemini has no C of its own: running as another
-user, resolving and opening files, and running `openssl` come from
+user and resolving and opening files come from
 pounix, and `GemAccess`'s time from poDateTime (PLAN.md, "pounix":
 Peaseblossom's step 4). Since 2026-11-17 a capsule may list its
 directories without `index.gmi` (`listings yes`, `-listings`; off by
 default), never showing a hidden name or anything not served, through
 pounix's `UnixFiles.OpenDirectory` (pounix Phase 8, so pounix must be
-that new): PLAN.md, "Directory listings".
+that new): PLAN.md, "Directory listings". Since 2026-11-18 `GemCert`
+makes certificates through polibtls's `TlsMake`, so pogemini needs no
+`openssl` at run time, only its tests do (PLAN.md, "Certificates
+through TlsMake"; polibtls d935372 or later).
 
 **poc 0.14.0 or later** (`StopRequests`), **and pounix, polibtls,
 posockets and poDateTime built by the same poc.** A poc library works

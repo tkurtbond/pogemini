@@ -16,10 +16,13 @@ MODULE TestCapsules; (* Capsules from a configuration file, and made certificate
 
    Last, what must stop the server, with exit status 1 and a reason on
    standard error: a mistake in the file, a certificate with no key
-   beside it, a root that isn't a directory, and openssl missing when a
-   certificate must be made; and with no capsule at all, the usage,
-   status 2. The file and certificates are in ../build/test-capsules,
-   made afresh. *)
+   beside it, a root that isn't a directory, a certificate directory
+   that can't be made; and with no capsule at all, the usage, status 2.
+   The certificate is made without openssl on PATH, through TlsMake,
+   before the root is checked, in a certificate directory made with its
+   parents; and a key found alone is given a certificate, not replaced.
+   The file and certificates are in ../build/test-capsules, made
+   afresh. *)
 
 IMPORT Out, Files, Platform, Tasks, Check, Child, GemClient;
 
@@ -227,6 +230,10 @@ BEGIN
     "  ... beside a certificate openssl reads");
   Check.Check(Check.Contains(got, "DNS:gen.example") & Check.Contains(got, "ecdsa-with-SHA256"),
     "  ... for gen.example, ECDSA with SHA-256");
+  (* 3650 days: still valid in 3645, and no longer in 3652 *)
+  Check.Check((Run("openssl x509 -in ../build/test-capsules/certs/gen.example.crt -noout -checkend 314928000") = 0)
+    & (Run("openssl x509 -in ../build/test-capsules/certs/gen.example.crt -noout -checkend 315532800") # 0),
+    "  ... valid for 3650 days");
   Serve(args, 1, 2);
   args := "-config ../build/test-capsules/pogemini.conf -cert ../build/certs/self-rsa.crt -key ../build/certs/self-rsa.key";
   Serve(args, 2, 3);
@@ -244,9 +251,21 @@ BEGIN
     "pogemini: localhost: ../build/test-capsules/pogemini.conf is not a directory");
   Refused("a certificate without its key", "-host localhost -cert ../build/certs/self-ec.crt", 1,
     "pogemini: localhost: a certificate needs its key, and a key its certificate");
-  RefusedWith("no openssl to make a certificate", "env PATH=/nonexistent ",
-    "-host b.example -certdir ../build/test-capsules/certs2", 1,
-    "pogemini: b.example: no certificate or key given, and openssl, which would make them, isn't on PATH");
+  RefusedWith("a certificate made with no openssl on PATH, then the root refused", "env PATH=/nonexistent ",
+    "-host b.example -certdir ../build/test-capsules/certs2/deeper -root ../build/test-capsules/pogemini.conf", 1,
+    "pogemini: b.example: ../build/test-capsules/pogemini.conf is not a directory");
+  Check.Check(Run("openssl x509 -in ../build/test-capsules/certs2/deeper/b.example.crt -noout -text") = 0,
+    "  ... the certificate made, in a directory made with its parent");
+  Check.Check(Check.Contains(got, "DNS:b.example"), "  ... for b.example");
+  Refused("a certificate directory that can't be made",
+    "-host c.example -certdir ../build/test-capsules/pogemini.conf/certs", 1,
+    "pogemini: c.example: can't make the certificate directory ../build/test-capsules/pogemini.conf/certs");
+  IF Platform.System("mkdir -p ../build/test-capsules/certs3 && cp ../build/certs/self-ec.key ../build/test-capsules/certs3/d.example.key") # 0 THEN END;
+  Refused("a key alone: given a certificate, then the root refused",
+    "-host d.example -certdir ../build/test-capsules/certs3 -root ../build/test-capsules/pogemini.conf", 1,
+    "pogemini: d.example: ../build/test-capsules/pogemini.conf is not a directory");
+  Check.Check(Run("cd ../build/test-capsules/certs3 && openssl x509 -in d.example.crt -noout -pubkey > c.pub && openssl pkey -in ../../certs/self-ec.key -pubout > k.pub && cmp c.pub k.pub && cmp d.example.key ../../certs/self-ec.key") = 0,
+    "  ... the certificate is for that key, and the key is unchanged");
   Refused("no capsule", "", 2, "usage: pogemini");
   Refused("the key pair of another", "-host localhost -cert ../build/certs/self-ec.crt -key ../build/certs/self-rsa.key", 1,
     "pogemini: certificate: ");

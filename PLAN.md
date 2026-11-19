@@ -292,7 +292,8 @@ Decided, 2026-11-16 (`GemConfig`, `GemCert`, `pogemini`):
   `.crt` alone is refused. The directory's name may not hold a `'`,
   since it is quoted for the shell. Without `openssl` on `PATH`, the
   server says so and exits 1. Made before the server listens, so a
-  slow `openssl` only delays the start.
+  slow `openssl` only delays the start. (Since 2026-11-18 made through
+  polibtls's `TlsMake` instead: "Certificates through TlsMake".)
 - **A capsule's root** must be a directory if given; Phase 4 serves it.
 - **Not done here**: `listen` takes one address (or all), as
   `GemServer.Listen` does; logging stays as Phase 1's, for Phase 6; a
@@ -755,6 +756,44 @@ IPv6 address" (59), as an unclosed one is; no address is that long.
 - `make test` passed on Linux, 316 checks. The BSDs wait for the hosts
   (To do later).
 
+### Certificates through TlsMake [done]
+
+Done 2026-11-18: `GemCert` makes a capsule's pair through polibtls's
+`TlsMake` (`EcKey`, `SelfSigned`), which calls the libcrypto libtls
+itself loads, instead of running `openssl` from a shell script, so
+pogemini needs no `openssl` at run time. The certificate is as before:
+ECDSA P-256, SHA-256, CN the name and subject alternative names the
+name and aliases (TlsMake tells an IP address from a DNS name itself),
+valid 3650 days from now (poDateTime's clock), basicConstraints
+CA:FALSE, critical.
+
+- **The files.** TlsMake writes a key whole, mode 0600, and never over
+  an existing file, then the certificate whole, mode 0644, so a pair is
+  still complete exactly when its `.crt` exists and a `.crt` alone is
+  still refused. A `.key` alone is no longer made again but given a
+  certificate: TlsMake can't have left half a key, and a key the user
+  put there is theirs to keep (TestCapsules checks the key is unchanged
+  and the certificate is for it).
+- **The directory** is made by the runtime's
+  `Directories.MakeDirectory`, with its parents, mode 0777 less the
+  umask, not 0700 as `umask 077` made it: the key's own mode is what
+  keeps it private.
+- **Errors** are TlsMake's own (a CN over 64 characters, an encrypted
+  or unreadable key, a directory that can't be written), and
+  "can't make the certificate directory <dir>".
+- **Tests.** TestCapsules: the made certificate valid for 3650 days
+  (`openssl x509 -checkend` either side; failed with 3000), made with
+  `PATH=/nonexistent` in a directory made with its parent, a directory
+  that can't be made, and a lone key given its certificate. `openssl`
+  is still needed by the tests.
+- One libcrypto: `build/pogemini` loads `/lib64/libcrypto.so.3`, the
+  one libtls loads.
+- `make test` passed on Linux, and `gmake test` on alerik, artos,
+  yishana, jherek and cymoril (319 to 321 checks, TestRun three more
+  times each; the skips only for clients a host lacks and for root),
+  with pounix, poDateTime, posockets and polibtls (d935372) from their
+  commits.
+
 ## To do later
 
 Left until the BSD hosts are next running (they were down on
@@ -780,7 +819,8 @@ Left until the BSD hosts are next running (they were down on
   many Gemini servers do (libtls can't; it would need OpenSSL's API, or
   running `openssl`), or document the `openssl` commands only?~~
   Generate one by running `openssl` when none is supplied (2026-11-16,
-  with the user): "Design".
+  with the user): "Design". Since 2026-11-18 through polibtls's
+  `TlsMake` instead, with no `openssl`: "Certificates through TlsMake".
 - ~~Does validating a request line belong here or in polibtls (polibtls's
   PLAN.md leaned towards here, with at most a bounded `ReadLine` in
   polibtls)?~~ Here: `GemServer` reads the line to CR LF within 1026

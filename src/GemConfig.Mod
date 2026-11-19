@@ -35,7 +35,7 @@ MODULE GemConfig; (* The configuration: a file of our own, and capsules *)
    name may contain spaces; a name or number must be one word. A host
    name is kept in lower case, as GemRequest gives a request's host, and
    must be a DNS name or an IP address, written plainly (::1, not [::1])
-   in ASCII: it names files and goes to openssl's command line
+   in ASCII: it names files and a made certificate's names
    (GemCert), so nothing else is let through.
 
    listings is yes or no, and no unless given: a capsule lists its

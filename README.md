@@ -49,12 +49,9 @@ setting. [PLAN.md](PLAN.md) has the design and the roadmap, and
   refuses a library another poc built. After upgrading poc, reinstall
   all four, poDateTime before polibtls and posockets, then rebuild
   this.
-- `openssl` (OpenSSL's or LibreSSL's) at run time, to make self-signed
-  certificates: only for a capsule given no certificate.
-
 `make deps` says whether the libraries are there. The program links
-libtls and nothing of poc's, so once built it needs only libtls (and
-`openssl`, as above).
+libtls (and the libcrypto libtls uses, to make self-signed
+certificates) and nothing of poc's, so once built it needs only libtls.
 
 ## Building and installing
 

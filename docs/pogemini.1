@@ -284,15 +284,14 @@ nor
 .Ic key
 gets a self-signed certificate, ECDSA P-256, for its name and aliases,
 valid ten years.
-It is made by running
-.Xr openssl 1 ,
-which must be on
-.Ev PATH ,
-the first time, and kept in the certificate directory as
+It is made the first time, and kept in the certificate directory as
 .Pa <name>.crt
 and
 .Pa <name>.key ,
 the key readable by its owner only; later runs use it as it is.
+A key put there alone, as
+.Pa <name>.key ,
+is kept and given its certificate.
 Clients pin the certificate they first see from a capsule, so keep the
 directory: a new certificate would look to them like an attack.
 A capsule for any host must be given its certificate and key.
@@ -338,9 +337,6 @@ Without
 .Ev XDG_DATA_HOME ,
 it is
 .Pa $HOME/.local/share/pogemini/certs .
-.It Ev PATH
-Searched for
-.Xr openssl 1 .
 .El
 .Sh EXIT STATUS
 0 after a stop by a signal, or after
@@ -381,7 +377,6 @@ capsule example.net
   root /srv/gemini/example.net
 .Ed
 .Sh SEE ALSO
-.Xr openssl 1 ,
 .Xr tls_init 3
 .Rs
 .%T Gemini network protocol specification
