@@ -40,6 +40,14 @@ MODULE pogemini; (* A Gemini server *)
    whoever really wants it. Not started as root, user may only name
    the user it is.
 
+   A client is served only if the configuration's allow and deny rules
+   let it (GemConfig), checked as it connects (GemRules): one refused is
+   closed before the TLS handshake, and logged. A rule's host name is
+   looked up as the server starts, and one that doesn't resolve is a
+   mistake in the configuration; then again every refresh seconds
+   (default 300), a change or a failure logged, the old addresses kept
+   on a failure.
+
    A request is checked by pogeminilib's GeminiUrls.CheckRequest, and
    answered by the capsule its
    host names (by name or alias), or else by the one for any host. Its
@@ -56,7 +64,7 @@ MODULE pogemini; (* A Gemini server *)
 
 IMPORT Platform, Out, Err, Args, Strings, Directories, Clocks, Instants, TimeStrings,
   Sockets, Tls, UnixErrors, UnixUsers, GeminiUrls, GeminiPunycode, GeminiTextWriter, GeminiServer,
-  GemConfig, GemCert, GemFiles, GemAccess;
+  GemAddresses, GemConfig, GemCert, GemFiles, GemAccess, GemRules;
 
 VAR
   config: GemConfig.Config;
@@ -150,6 +158,9 @@ END OutEscaped;
 
      <time> <client address> <status> <request> <client certificate | ->
      <time> <client address> failed: <why>
+     <time> <client address> refused
+     <time> allow|deny <name>: now <address> ...
+     <time> allow|deny <name>: lookup failed, kept <n> addresses: <why>
      <time> accept failed: <why>
      <time> stopping on signal <n>, connections in progress: <k>
      <time> stopped
@@ -159,11 +170,16 @@ END OutEscaped;
    out itself: the C library's gmtime_r loads the UTC zone first, which
    needs more stack than a task has on NetBSD and OpenBSD. Nothing here
    waits, so lines never mix. *)
-PROCEDURE Log(s: GeminiServer.Server; event: INTEGER; x: GeminiServer.Exchange; why-: ARRAY OF CHAR);
+PROCEDURE Time;
   VAR now: Instants.Instant; t: ARRAY 32 OF CHAR;
 BEGIN
   Clocks.Now(now); TimeStrings.Instant(now, 0, t);
-  Out.String(t); Out.Char(" ");
+  Out.String(t); Out.Char(" ")
+END Time;
+
+PROCEDURE Log(s: GeminiServer.Server; event: INTEGER; x: GeminiServer.Exchange; why-: ARRAY OF CHAR);
+BEGIN
+  Time;
   CASE event OF
   | GeminiServer.served:
     Out.String(x.peer.host); Out.Char(" "); Out.Int(x.status, 0); Out.Char(" ");
@@ -172,6 +188,8 @@ BEGIN
     IF x.certHash = NIL THEN Out.Char("-") ELSE Out.String(x.certHash^) END
   | GeminiServer.failed:
     Out.String(x.peer.host); Out.String(" failed: "); Out.String(why)
+  | GeminiServer.refused:
+    Out.String(x.peer.host); Out.String(" refused")
   | GeminiServer.acceptFailed:
     Out.String("accept failed: "); Out.String(why)
   | GeminiServer.stopping:
@@ -182,6 +200,23 @@ BEGIN
   END;
   Out.Ln
 END Log;
+
+(* A rule's name looked up again (GemRules): its new addresses, or why
+   the lookup failed. *)
+PROCEDURE Report(r: GemConfig.Rule; why-: ARRAY OF CHAR);
+  VAR i: INTEGER; t: ARRAY 48 OF CHAR;
+BEGIN
+  Time;
+  IF r.allow THEN Out.String("allow ") ELSE Out.String("deny ") END;
+  Out.String(r.name);
+  IF why # "" THEN
+    Out.String(": lookup failed, kept "); Out.Int(r.nAddrs, 0); Out.String(" addresses: "); Out.String(why)
+  ELSE
+    Out.String(": now");
+    FOR i := 0 TO r.nAddrs - 1 DO GemAddresses.Format(r.addrs[i], t); Out.Char(" "); Out.String(t) END
+  END;
+  Out.Ln
+END Report;
 
 (* Makes ready the capsules of config: a certificate and key for each,
    made in certdir if need be, and the root checked. *)
@@ -310,14 +345,17 @@ BEGIN
   IF config.port < 0 THEN config.port := GemConfig.DefaultPort END;
   IF config.deadline < 0 THEN config.deadline := GemConfig.DefaultDeadline END;
   IF config.connections < 0 THEN config.connections := GeminiServer.DefaultLimit END;
+  IF config.refresh < 0 THEN config.refresh := GemConfig.DefaultRefresh END;
   IF (config.user = "") & UnixUsers.Root() THEN
     Fail("", "started as root: give -user, a user to serve files as (-user root to stay root)")
   END;
   IF (certdir = "") & ~GemCert.DefaultDir(certdir) THEN certdir := "" END;
 
   Prepare(certdir);
+  IF ~GemRules.Start(config, Report, why) THEN Fail("", why) END;
   s := GeminiServer.New(Context(), Respond);
   s.SetLog(Log); s.SetDeadline(config.deadline); s.SetLimit(config.connections);
+  IF config.nRules > 0 THEN s.SetAdmit(GemRules.Admit) END;
   IF ~s.Listen(config.listen, SHORT(config.port), err) THEN Fail("listen", err.text) END;
   (* Listening first, as root, for a port below 1024; the listeners are
      closed before failing, not left to the kernel (make valgrind). *)

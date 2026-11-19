@@ -980,6 +980,62 @@ under valgrind with load averages 16 to 18 then passed. Under the 40
 loops (load about 50) the server still overran 3000 ms: no deadline
 that fits under GemClient's survives that.
 
+### Address rules [done]
+
+2026-11-19, with the user: who is served, by the client's address, in
+two steps, addresses first and names after. `allow` and `deny` lines,
+global only, each naming an IPv4 or IPv6 address, a range (CIDR), `all`
+or a host name; checked in order as a connection is accepted, the first
+match deciding and no match meaning served, as in a firewall and
+nginx's `allow`/`deny`. At most 64 (`GemConfig.MaxRules`).
+
+- **Before the handshake.** pogeminilib gained `GeminiServer.SetAdmit`
+  and the `refused` event (its "Refusing clients by address"): a
+  refused connection is closed unread, costing no TLS and no task, and
+  counts toward `-n` but not the limit. Its client sees the handshake
+  fail at EOF ("unexpected eof while reading"), or a reset if its
+  ClientHello was already queued; a client writing then gets SIGPIPE,
+  which TestRun's own client now ignores.
+- **Addresses as 16 bytes** (`GemAddresses`, in Oberon, since posockets
+  binds no `inet_pton`): IPv4 held IPv4-mapped, its prefix plus 96, so
+  `192.0.2.0/24` matches a client the kernel gives as
+  `::ffff:192.0.2.1`, and one comparison serves both families; a zone
+  (`%eth0`) dropped. A range with bits set past its prefix
+  (`192.0.2.1/24`) is refused as a likely mistake. Text that is digits
+  and dots, or has `:` or `/`, must be an address or range, so
+  `192.0.2.300` is refused rather than looked up as a name. `Format`
+  writes RFC 5952's form, for the log.
+- **Names forward, never reverse.** A client's address is never looked
+  up: reverse DNS is the client's to control, and slow. A rule's name
+  is resolved when the server starts (`Sockets.ResolveWithin`, 10 s
+  each), one that doesn't resolve being a mistake in the configuration
+  (exit 1); then by a task every `refresh` seconds (default 300, 0
+  never, at most 86400) through `SocketTasks.Resolve`, which waits in a
+  thread, so the server goes on serving. A failed lookup keeps the
+  addresses the name had, since a name server down for a moment
+  shouldn't let in a client denied or keep out one allowed, and is
+  logged at each refresh until one succeeds; a change is logged with
+  the new addresses. They replace the old in one assignment, which no
+  other task sees half made, tasks being cooperative.
+- **Tests.** TestConfig: parsing and formatting addresses, ranges and
+  their refusals, the rules read, ordered and matched, a name by the
+  addresses given it, and MaxRules. TestRun, through the server: `deny
+  127.0.0.1` refuses that client and serves `::1`, logging both;
+  `allow localhost` then `deny all` serves both before and after a
+  1 s refresh, with nothing reported; `deny localhost` refuses both;
+  `allow nowhere.invalid` stops the server at start. `make test` and
+  `make valgrind` pass. A change and a failure can't be made in a test
+  without control of the resolver, so they were checked by hand, in a
+  user namespace with `/etc/hosts` bind-mounted over a file edited while
+  the server ran (`unshare -rm`, the server under a nested `unshare -U
+  --map-user`, since it refuses to run as root): it logged `now
+  2001:db8::7 192.0.2.1` when the second address appeared, `lookup
+  failed, kept 2 addresses: ... Name or service not known` at each
+  refresh while the name was gone, then `now 127.0.0.1`.
+- **The BSDs.** `gmake test` of pogeminilib and pogemini, from their
+  working trees, and TestRun three more times, passed on alerik,
+  artos, yishana, jherek and cymoril (2026-11-19), with no FAIL.
+
 ## To do later
 
 From the listen backlog's change to 128 (83e75d5, "Open questions"),
@@ -1010,6 +1066,16 @@ the first two left until the BSD hosts were next running; all done
    `docs/mild-load-test.md`.
 
 ## Open questions
+
+- **posockets halts on a name with more addresses than its caller's
+  array holds** (`Sockets.Resolve`, `ResolveWithin` and
+  `SocketTasks.Resolve`, AssertArgument 84, its HaltAddrs). For a rule's
+  name that is outside data, which shouldn't halt: GemRules gives it
+  256, far more than any name has, so the halt is out of reach in
+  practice, not in principle. Better would be for posockets to return
+  the first addresses that fit and say how many there were, or fail
+  with an error kind of its own; a change to posockets' documented
+  contract, so left for the user to decide.
 
 - ~~The configuration format: a small line-based file of our own, YAML
   through polibfyaml, or the command line only?~~ A file of our own and

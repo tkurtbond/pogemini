@@ -5,7 +5,7 @@ MODULE TestConfig; (* GemConfig: configuration files read, and refused *)
    with the line and the reason. The files are written into
    ../build/test-config, made afresh. *)
 
-IMPORT Out, Files, Platform, Check, GemConfig;
+IMPORT Out, Files, Platform, Check, GemAddresses, GemConfig;
 
 CONST Dir = "../build/test-config/";
 
@@ -41,6 +41,66 @@ BEGIN
   c := GemConfig.New(); error := "";
   RETURN GemConfig.Read(c, path, error)
 END Read;
+
+(* s parses, and formats back as f. *)
+PROCEDURE Formats(s, f: ARRAY OF CHAR): BOOLEAN;
+  VAR a: GemAddresses.Address; t: ARRAY 64 OF CHAR;
+BEGIN
+  IF ~GemAddresses.Parse(s, a) THEN Out.String("  not parsed: "); Out.String(s); Out.Ln; RETURN FALSE END;
+  GemAddresses.Format(a, t);
+  IF t # f THEN Out.String("  "); Out.String(s); Out.String(" as "); Out.String(t); Out.Ln END;
+  RETURN t = f
+END Formats;
+
+(* s is no address. *)
+PROCEDURE NotAddress(s: ARRAY OF CHAR): BOOLEAN;
+  VAR a: GemAddresses.Address;
+BEGIN
+  IF GemAddresses.Parse(s, a) THEN Out.String("  parsed: "); Out.String(s); Out.Ln; RETURN FALSE END;
+  RETURN TRUE
+END NotAddress;
+
+(* Whether address s is in range r, both parsed. *)
+PROCEDURE InRange(s, r: ARRAY OF CHAR): BOOLEAN;
+  VAR a: GemAddresses.Address; g: GemAddresses.Range; why: ARRAY 128 OF CHAR;
+BEGIN
+  RETURN GemAddresses.Parse(s, a) & GemAddresses.ParseRange(r, g, why) & GemAddresses.In(a, g)
+END InRange;
+
+(* Range s is refused, with why. *)
+PROCEDURE BadRange(s, expected: ARRAY OF CHAR): BOOLEAN;
+  VAR g: GemAddresses.Range; why: ARRAY 128 OF CHAR;
+BEGIN
+  why := "";
+  IF GemAddresses.ParseRange(s, g, why) OR (why # expected) THEN
+    Out.String("  "); Out.String(s); Out.String(": "); Out.String(why); Out.Ln; RETURN FALSE
+  END;
+  RETURN TRUE
+END BadRange;
+
+(* Whether c, as read, serves address s. *)
+PROCEDURE Serves(s: ARRAY OF CHAR): BOOLEAN;
+  VAR a: GemAddresses.Address;
+BEGIN
+  IF ~GemAddresses.Parse(s, a) THEN Out.String("  not parsed: "); Out.String(s); Out.Ln; RETURN FALSE END;
+  RETURN c.Admits(a)
+END Serves;
+
+(* Gives c's rule i the one address s, as a lookup would. *)
+PROCEDURE Found(i: INTEGER; s: ARRAY OF CHAR);
+BEGIN
+  NEW(c.rules[i].addrs, 1); c.rules[i].nAddrs := 1;
+  IF GemAddresses.Parse(s, c.rules[i].addrs[0]) THEN END
+END Found;
+
+(* Writes the file many: n lines of "deny all". *)
+PROCEDURE Many(n: INTEGER);
+  VAR t: ARRAY 1024 OF CHAR; line: ARRAY 10 OF CHAR; i, j, k: LONGINT;
+BEGIN
+  line := "deny all|"; k := 0;
+  FOR i := 1 TO n DO FOR j := 0 TO 8 DO t[k] := line[j]; INC(k) END END;
+  t[k] := 0X; Write("many", t)
+END Many;
 
 (* A file of text is refused, with error. *)
 PROCEDURE Bad(label, text, expected: ARRAY OF CHAR);
@@ -171,6 +231,72 @@ BEGIN
     & GemConfig.ValidName("xn--bcher-kva.example") & GemConfig.ValidName("localhost")
     & GemConfig.ValidName("2001:db8::1") & GemConfig.ValidName("10.0.0.1"),
     "ValidName: names and addresses");
+
+  (* GemAddresses, and the rules *)
+  Check.Check(Formats("192.0.2.1", "192.0.2.1") & Formats("0.0.0.0", "0.0.0.0")
+    & Formats("255.255.255.255", "255.255.255.255"), "GemAddresses: IPv4");
+  Check.Check(Formats("::ffff:192.0.2.1", "192.0.2.1") & Formats("::FFFF:c000:0201", "192.0.2.1")
+    & Formats("0:0:0:0:0:ffff:192.0.2.1", "192.0.2.1"), "  ... IPv4-mapped IPv6, as IPv4");
+  Check.Check(Formats("::1", "::1") & Formats("::", "::") & Formats("2001:DB8:0:0:0:0:0:1", "2001:db8::1")
+    & Formats("2001:0db8:0000:0001:0000:0000:0000:0001", "2001:db8:0:1::1")
+    & Formats("2001:db8:0:0:1:0:0:1", "2001:db8::1:0:0:1") & Formats("1::", "1::")
+    & Formats("1:2:3:4:5:6:7:8", "1:2:3:4:5:6:7:8") & Formats("1:0:2:3:4:5:6:7", "1:0:2:3:4:5:6:7")
+    & Formats("::2:3:4:5:6:7:8", "0:2:3:4:5:6:7:8") & Formats("::192.0.2.1", "::c000:201"),
+    "  ... IPv6, as RFC 5952 writes it");
+  Check.Check(Formats("fe80::1%eth0", "fe80::1") & NotAddress("fe80::1%") & NotAddress("192.0.2.1%eth0"),
+    "  ... a zone dropped, only on IPv6, and not empty");
+  Check.Check(NotAddress("") & NotAddress("192.0.2") & NotAddress("192.0.2.1.5") & NotAddress("192.0.2.256")
+    & NotAddress("192.0.2.01") & NotAddress("192.0.2.1 ") & NotAddress("1:2:3:4:5:6:7")
+    & NotAddress("1:2:3:4:5:6:7:8:9") & NotAddress("1::2::3") & NotAddress("12345::")
+    & NotAddress("::g") & NotAddress(":1::") & NotAddress("1:::2") & NotAddress("1:2:3:4:5:6:7::8")
+    & NotAddress("localhost"),
+    "  ... not addresses");
+  Check.Check(InRange("192.0.2.77", "192.0.2.0/24") & ~InRange("192.0.3.1", "192.0.2.0/24")
+    & InRange("::ffff:192.0.2.77", "192.0.2.0/24") & InRange("10.1.2.3", "0.0.0.0/0")
+    & ~InRange("::1", "0.0.0.0/0") & InRange("192.0.2.1", "192.0.2.1")
+    & ~InRange("192.0.2.2", "192.0.2.1") & InRange("192.0.2.129", "192.0.2.128/25")
+    & ~InRange("192.0.2.127", "192.0.2.128/25"),
+    "  ... IPv4 ranges, matching IPv4-mapped, not IPv6");
+  Check.Check(InRange("2001:db8::5", "2001:db8::/32") & ~InRange("2001:db9::5", "2001:db8::/32")
+    & InRange("fe80::1%eth0", "fe80::/10") & InRange("febf::1", "fe80::/10") & ~InRange("fec0::1", "fe80::/10")
+    & InRange("::1", "::/0") & InRange("192.0.2.1", "::/0") & InRange("::1", "::1"),
+    "  ... IPv6 ranges");
+  Check.Check(BadRange("192.0.2.1/24", "an address with bits set past its range's prefix")
+    & BadRange("2001:db8::1/64", "an address with bits set past its range's prefix")
+    & BadRange("192.0.2.0/33", "a range's prefix is 0 to 32 bits for IPv4, 0 to 128 for IPv6")
+    & BadRange("::/129", "a range's prefix is 0 to 32 bits for IPv4, 0 to 128 for IPv6")
+    & BadRange("192.0.2.0/024", "a range's prefix is 0 to 32 bits for IPv4, 0 to 128 for IPv6")
+    & BadRange("192.0.2.0/", "a range's prefix is 0 to 32 bits for IPv4, 0 to 128 for IPv6")
+    & BadRange("192.0.2.0/2x", "a range's prefix is 0 to 32 bits for IPv4, 0 to 128 for IPv6")
+    & BadRange("192.0.2/24", "not an address or range"),
+    "  ... ranges refused");
+
+  Write("rules", "refresh 60|allow 192.0.2.0/24|deny 192.0.2.7|allow Gemini.Example|deny ::1|allow 2001:db8::/32|deny all|capsule a.example");
+  Check.Check(Read("rules") & (c.nRules = 6) & (c.refresh = 60), "rules: read, in order");
+  IF error # "" THEN Out.String("  error: "); Out.String(error); Out.Ln END;
+  Check.Check(c.rules[0].allow & ~c.rules[1].allow & (c.rules[0].name = "") & (c.rules[2].name = "gemini.example")
+    & (c.rules[2].nAddrs = 0) & (c.rules[5].range.bits = 0), "  ... allow and deny, a name lowered, all");
+  Check.Check(Serves("192.0.2.7") & Serves("192.0.2.1") & ~Serves("192.0.3.1") & ~Serves("::1")
+    & Serves("2001:db8::1") & ~Serves("2001:db9::1"), "  ... the first rule to match decides");
+  Found(2, "198.51.100.9");
+  Check.Check(Serves("198.51.100.9") & ~Serves("198.51.100.10"), "  ... a name, by the addresses found for it");
+  Write("norules", "deny 192.0.2.1");
+  Check.Check(Read("norules") & ~Serves("192.0.2.1") & Serves("192.0.2.2") & Serves("::1") & (c.refresh = -1),
+    "  ... none matching: served");
+  Bad("a range with host bits", "deny 192.0.2.1/24",
+    "../build/test-config/bad:1: an address with bits set past its range's prefix: 192.0.2.1/24");
+  Bad("an address too large", "deny 192.0.2.300", "../build/test-config/bad:1: not an address or range: 192.0.2.300");
+  Bad("a bad name", "allow a_b.example", "../build/test-config/bad:1: not a host name: a_b.example");
+  Bad("a rule of two words", "allow 192.0.2.1 192.0.2.2", "../build/test-config/bad:1: allow takes one word");
+  Bad("a rule inside a capsule", "capsule a.example|deny all",
+    "../build/test-config/bad:2: deny inside a capsule: global settings come first");
+  Bad("refresh too large", "refresh 86401", "../build/test-config/bad:1: refresh is 0 to 86400 s");
+  Many(GemConfig.MaxRules);
+  Check.Check(Read("many") & (c.nRules = GemConfig.MaxRules), "  ... as many rules as MaxRules");
+  Many(GemConfig.MaxRules + 1);
+  Check.Check(~Read("many") & (error = "../build/test-config/many:65: too many allow and deny rules"),
+    "  ... and no more");
+  IF ~Check.Contains(error, "many:65:") THEN Out.String("  error: "); Out.String(error); Out.Ln END;
 
   (* The example installed with the server: it must stay one the server
      reads, and say what its comments say. *)

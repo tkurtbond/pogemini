@@ -13,7 +13,13 @@ MODULE TestRun; (* Running the server: stopping, its limit, its log, its user *)
    - every line of the log after the port begins with the time, UTC,
      as 2026-11-16T12:34:56Z;
    - -user: not root, the user it is serves, root and an unknown user
-     stop it; as root, it refuses to start without -user. *)
+     stop it; as root, it refuses to start without -user;
+   - allow and deny: "deny 127.0.0.1" refuses that client before its
+     handshake, logging it, and serves ::1; "allow localhost" then "deny
+     all" serves both, as the name's addresses, and still does after a
+     refresh; "deny localhost" refuses both; a name that doesn't
+     resolve stops the server as it starts. The configurations are
+     written into ../build/test-run. *)
 
 IMPORT Out, Platform, Tasks, Sockets, SocketTasks, Check, Child, GemClient, UnixUsers;
 
@@ -26,11 +32,16 @@ CONST
 TYPE
   Text = ARRAY 2048 OF CHAR;
   (* what a Test task does *)
-  Test = POINTER TO RECORD (Tasks.TaskDesc) kind: INTEGER END;
+  Test = POINTER TO RECORD (Tasks.TaskDesc)
+    kind: INTEGER;
+    v4, v6: BOOLEAN;   (* Rules: whether 127.0.0.1 and ::1 are to be served *)
+    label: Text;
+    wait: LONGINT      (* Rules: ms to wait first *)
+  END;
   Closer = POINTER TO RECORD (Tasks.TaskDesc) s: Sockets.Socket END;
 
 CONST
-  Term = 1; Limited = 2; Unlimited = 3; Fetch = 4;
+  Term = 1; Limited = 2; Unlimited = 3; Fetch = 4; Rules = 5;
 
 VAR
   server: Child.Child;
@@ -120,6 +131,14 @@ BEGIN
   RETURN TRUE
 END Served;
 
+(* r served if served, else refused: no response at all. *)
+PROCEDURE Admitted(r: GemClient.Response; served: BOOLEAN): BOOLEAN;
+BEGIN
+  IF served THEN RETURN Served(r) END;
+  IF r.ok OR (r.len # 0) THEN Out.String("  response: "); Out.String(r.data^); Out.Ln; RETURN FALSE END;
+  RETURN TRUE
+END Admitted;
+
 PROCEDURE (c: Closer) Run*;
 BEGIN Tasks.Sleep(Hold); Sockets.Close(c.s)
 END Run;
@@ -160,10 +179,39 @@ BEGIN
       Check.Check(n < Hold - 400, "  ... at once")
     END;
     Tasks.Join(closer)
+  ELSIF t.kind = Rules THEN
+    IF t.wait > 0 THEN Tasks.Sleep(t.wait) END;
+    Check.Check(Admitted(GemClient.Fetch("127.0.0.1", port, req, len, "", ""), t.v4), t.label);
+    Check.Check(Admitted(GemClient.Fetch("::1", port, req, len, "", ""), t.v6), "  ... ::1")
   ELSE
     Check.Check(Served(GemClient.Fetch("127.0.0.1", port, req, len, "", "")), "  ... and serves")
   END
 END Run;
+
+(* Writes the configuration file name in ../build/test-run: text, each
+   "|" a line feed, by printf. *)
+PROCEDURE Config(name, text: ARRAY OF CHAR);
+  VAR cmd: Text; i, j: LONGINT;
+BEGIN
+  cmd := "printf '"; i := Length(cmd); j := 0;
+  WHILE text[j] # 0X DO
+    IF text[j] = "|" THEN cmd[i] := "\"; cmd[i + 1] := "n"; INC(i, 2)
+    ELSE cmd[i] := text[j]; INC(i)
+    END;
+    INC(j)
+  END;
+  cmd[i] := 0X; Append(cmd, "' > ../build/test-run/"); Append(cmd, name);
+  IF Platform.System(cmd) # 0 THEN Check.Check(FALSE, cmd) END
+END Config;
+
+(* With the server started already: fetches from 127.0.0.1 and ::1,
+   after wait ms, served or refused as v4 and v6 say. *)
+PROCEDURE DriveRules(v4, v6: BOOLEAN; wait: LONGINT; label: ARRAY OF CHAR);
+  VAR t: Test;
+BEGIN
+  NEW(t); t.kind := Rules; t.v4 := v4; t.v6 := v6; t.wait := wait; COPY(label, t.label);
+  Tasks.Start(t, StackSize); Tasks.Join(t)
+END DriveRules;
 
 (* Runs a Test of kind against the server started already. *)
 PROCEDURE Drive(kind: INTEGER);
@@ -174,6 +222,9 @@ END Drive;
 PROCEDURE Main;
   VAR log: ARRAY 65536 OF CHAR; n: LONGINT; status: INTEGER; args: Text;
 BEGIN
+  (* a client the server refuses may write its ClientHello after the
+     server has closed the connection *)
+  Sockets.IgnoreBrokenPipe;
   IF Start("-deadline 5000") THEN
     Drive(Term);
     Check.Check(Child.Wait(server, log, n) = 0, "  ... and the server exits 0");
@@ -220,6 +271,38 @@ BEGIN
       Check.Check(Child.Wait(server, log, n) = 0, "  ... and exits 0")
     END
   END;
+  IF Platform.System("rm -rf ../build/test-run && mkdir -p ../build/test-run") # 0 THEN
+    Check.Check(FALSE, "make ../build/test-run")
+  END;
+  Config("deny", "deny 127.0.0.1|");
+  IF Start("-n 2 -config ../build/test-run/deny") THEN
+    DriveRules(FALSE, TRUE, 0, "deny 127.0.0.1: refused");
+    Check.Check(Child.Wait(server, log, n) = 0, "  ... and the server exits 0, the refused one counted");
+    Out.String(log);
+    Check.Check(Check.Contains(log, " 127.0.0.1 refused") & Check.Contains(log, " ::1 20 gemini://localhost:")
+      & ~Check.Contains(log, " 127.0.0.1 failed"), "  ... logged as refused, and ::1 as served")
+  END;
+  Config("allow", "refresh 1|allow localhost|deny all|");
+  IF Start("-n 4 -config ../build/test-run/allow") THEN
+    DriveRules(TRUE, TRUE, 0, "allow localhost, deny all: 127.0.0.1 served");
+    DriveRules(TRUE, TRUE, 1500, "  ... and after a refresh");
+    Check.Check(Child.Wait(server, log, n) = 0, "  ... and the server exits 0");
+    Out.String(log);
+    Check.Check(~Check.Contains(log, "refused") & ~Check.Contains(log, "allow localhost"),
+      "  ... nothing refused, and no change or failure reported")
+  END;
+  Config("denyname", "deny localhost|");
+  IF Start("-n 2 -config ../build/test-run/denyname") THEN
+    DriveRules(FALSE, FALSE, 0, "deny localhost: 127.0.0.1 refused");
+    Check.Check(Child.Wait(server, log, n) = 0, "  ... and the server exits 0")
+  END;
+  Config("nowhere", "allow nowhere.invalid|");
+  status := Run("exec $POGEMINI_UNDER ../build/pogemini -port 0 -n 1 -config ../build/test-run/nowhere -cert ../build/certs/self-ec.crt -key ../build/certs/self-ec.key");
+  Check.Check((status = 1) & Check.Contains(got, "pogemini: allow nowhere.invalid: "),
+    "a rule's name that doesn't resolve: the server doesn't start");
+  IF status # 1 THEN Out.String(got) END;
+  IF Platform.System("rm -rf ../build/test-run") # 0 THEN END;
+
   status := Run("exec $POGEMINI_UNDER ../build/pogemini -port 0 -n 1 -user no-such-user-pogemini -cert ../build/certs/self-ec.crt -key ../build/certs/self-ec.key");
   Check.Check((status = 1) & Check.Contains(got, "pogemini: become no-such-user-pogemini: no such user"),
     "-user, an unknown user: refused");

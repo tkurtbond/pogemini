@@ -11,6 +11,9 @@ MODULE GemConfig; (* The configuration: a file of our own, and capsules *)
      connections 256         connections served at once, at most
      user gemini             the user to serve as, if started as root
      certdir /var/lib/pogemini/certs   where made certificates are kept
+     allow 192.0.2.0/24      who is served, by address: allow or deny
+     deny all                an address, a range, all, or a host name
+     refresh 300             s between lookups of those names (0: never)
 
      capsule example.org     a capsule, by its host name; what follows
        alias www.example.org   is its own, up to the next capsule:
@@ -40,11 +43,22 @@ MODULE GemConfig; (* The configuration: a file of our own, and capsules *)
    plainly (::1, not [::1]): it names files and a made certificate's
    names (GemCert), so nothing else is let through.
 
+   allow and deny are rules on the client's address, checked in their
+   order as each connection is accepted, before the TLS handshake: the
+   first that matches decides, and a client none matches is served. So
+   "allow 192.0.2.0/24" then "deny all" serves only that range, and
+   "deny 198.51.100.7" alone refuses only that address. A rule names an
+   IPv4 or IPv6 address, a range (192.0.2.0/24, 2001:db8::/32, with no
+   bit set past the prefix), all, or a host name, whose addresses
+   (pogemini looks them up when it starts, and again every refresh
+   seconds) it matches; an address is never looked up by name. An IPv4
+   rule matches a client given as IPv4-mapped IPv6 (GemAddresses).
+
    listings is yes or no, and no unless given: a capsule lists its
    directories only when asked to, since one that never meant to would
    show files it hasn't linked to (GemFiles). *)
 
-IMPORT Files, Strings, GeminiPunycode;
+IMPORT Files, Strings, GeminiPunycode, GemAddresses;
 
 CONST
   MaxCapsules* = 64;
@@ -58,6 +72,9 @@ CONST
   MaxAreas* = 32;      (* requires in a capsule *)
   MaxIdentities* = 64; (* identities in a require *)
   HashLen* = 72;       (* "SHA256:", 64 hex digits, 0X *)
+  MaxRules* = 64;      (* allow and deny lines *)
+  DefaultRefresh* = 300;  (* s between lookups of the rules' names *)
+  MaxRefresh* = 86400;
   LineLen = 1100;
 
 TYPE
@@ -71,6 +88,18 @@ TYPE
     path*: Path;              (* "/", or a path without a final "/" *)
     ids*: ARRAY MaxIdentities OF Hash;  (* "SHA256:" and lower-case hex *)
     nIds*: INTEGER            (* 0: any certificate *)
+  END;
+
+  Addresses* = POINTER TO ARRAY OF GemAddresses.Address;
+
+  (* An allow or deny line. *)
+  Rule* = POINTER TO RuleDesc;
+  RuleDesc* = RECORD
+    allow*: BOOLEAN;          (* allow, or deny *)
+    name*: Name;              (* a host name, in ASCII, or "" *)
+    range*: GemAddresses.Range;  (* when name is "" *)
+    addrs*: Addresses;        (* name's, as last looked up; NIL before *)
+    nAddrs*: INTEGER
   END;
 
   Capsule* = POINTER TO CapsuleDesc;
@@ -92,6 +121,9 @@ TYPE
     certdir*: Path;           (* "" when not given *)
     connections*: LONGINT;    (* -1 when not given *)
     user*: Name;              (* "" when not given *)
+    rules*: ARRAY MaxRules OF Rule;
+    nRules*: INTEGER;
+    refresh*: LONGINT;        (* -1 when not given *)
     capsules*: ARRAY MaxCapsules OF Capsule;
     n*: INTEGER
   END;
@@ -100,7 +132,7 @@ PROCEDURE New*(): Config;
   VAR c: Config;
 BEGIN
   NEW(c); c.listen := ""; c.port := -1; c.deadline := -1; c.certdir := ""; c.n := 0;
-  c.connections := -1; c.user := "";
+  c.connections := -1; c.user := ""; c.nRules := 0; c.refresh := -1;
   RETURN c
 END New;
 
@@ -293,6 +325,53 @@ BEGIN
   RETURN TRUE
 END AddIdentity;
 
+(* Adds to c a rule, allow or deny, for what: an address, a range, all,
+   or a host name (the module's comment). FALSE, with why, if what is
+   none of them, or c has MaxRules. *)
+PROCEDURE (c: Config) AddRule*(allow: BOOLEAN; what: ARRAY OF CHAR;
+    VAR why: ARRAY OF CHAR): BOOLEAN;
+  VAR r: Rule; i: LONGINT; digitsAndDots: BOOLEAN; reason: ARRAY 128 OF CHAR;
+BEGIN
+  IF c.nRules = MaxRules THEN COPY("too many allow and deny rules", why); RETURN FALSE END;
+  NEW(r); r.allow := allow; r.name := ""; r.addrs := NIL; r.nAddrs := 0;
+  (* an address or range has ":" or "/", or is digits and dots; a name
+     has a letter or hyphen, so 192.0.2.300 is refused, not looked up *)
+  digitsAndDots := TRUE; i := 0;
+  WHILE what[i] # 0X DO
+    IF ~IsDigit(what[i]) & (what[i] # ".") THEN digitsAndDots := FALSE END;
+    INC(i)
+  END;
+  IF what = "all" THEN GemAddresses.All(r.range)
+  ELSIF digitsAndDots OR (Strings.Pos(":", what, 0) >= 0) OR (Strings.Pos("/", what, 0) >= 0) THEN
+    IF ~GemAddresses.ParseRange(what, r.range, reason) THEN
+      COPY(reason, why); Strings.Append(": ", why); Strings.Append(what, why); RETURN FALSE
+    END
+  ELSIF ~HostName(what, r.name, why) THEN RETURN FALSE
+  END;
+  c.rules[c.nRules] := r; INC(c.nRules);
+  RETURN TRUE
+END AddRule;
+
+(* Whether c serves a client at address a, by its rules as they stand
+   (the module's comment). *)
+PROCEDURE (c: Config) Admits*(VAR a: GemAddresses.Address): BOOLEAN;
+  VAR i, j: INTEGER; r: Rule; one: GemAddresses.Range;
+BEGIN
+  FOR i := 0 TO c.nRules - 1 DO
+    r := c.rules[i];
+    IF r.name = "" THEN
+      IF GemAddresses.In(a, r.range) THEN RETURN r.allow END
+    ELSE
+      one.bits := 128;
+      FOR j := 0 TO r.nAddrs - 1 DO
+        one.a := r.addrs[j];
+        IF GemAddresses.In(a, one) THEN RETURN r.allow END
+      END
+    END
+  END;
+  RETURN TRUE
+END Admits;
+
 (* s as a number from lo to hi, or FALSE. *)
 PROCEDURE Number*(s: ARRAY OF CHAR; lo, hi: LONGINT; VAR x: LONGINT): BOOLEAN;
   VAR i: LONGINT;
@@ -365,7 +444,7 @@ BEGIN
   IF value = "" THEN COPY(key, why); Strings.Append(" needs a value", why); RETURN FALSE END;
   IF (key = "capsule") OR (key = "alias") OR (key = "listen") OR (key = "port")
     OR (key = "deadline") OR (key = "identity") OR (key = "connections") OR (key = "user")
-    OR (key = "listings") THEN
+    OR (key = "listings") OR (key = "allow") OR (key = "deny") OR (key = "refresh") THEN
     IF ~OneWord(value) THEN COPY(key, why); Strings.Append(" takes one word", why); RETURN FALSE END
   END;
   IF key = "capsule" THEN a := NIL; RETURN c.Add(value, FALSE, k, why)
@@ -405,6 +484,10 @@ BEGIN
   ELSIF key = "user" THEN
     IF Strings.Length(value) >= NameLen THEN COPY("a user name too long", why); RETURN FALSE END;
     COPY(value, c.user)
+  ELSIF (key = "allow") OR (key = "deny") THEN RETURN c.AddRule(key = "allow", value, why)
+  ELSIF key = "refresh" THEN
+    IF ~Number(value, 0, MaxRefresh, x) THEN COPY("refresh is 0 to 86400 s", why); RETURN FALSE END;
+    c.refresh := x
   ELSIF key = "certdir" THEN
     IF Strings.Length(value) >= PathLen THEN COPY("a file name too long", why); RETURN FALSE END;
     COPY(value, c.certdir)

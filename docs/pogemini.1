@@ -114,6 +114,19 @@ Then it logs a line per connection, beginning with the time, UTC:
 .Bd -literal -offset indent
 <time> <client address> <status> <request> <client certificate | ->
 <time> <client address> failed: <why>
+<time> <client address> refused
+.Ed
+.Pp
+A client refused by an
+.Ic allow
+or
+.Ic deny
+rule is closed before its handshake.
+A rule's host name looked up again logs its new addresses when they
+change, or why the lookup failed, at each refresh until one succeeds:
+.Bd -literal -offset indent
+<time> allow|deny <name>: now <address> ...
+<time> allow|deny <name>: lookup failed, kept <n> addresses: <why>
 .Ed
 .Pp
 The request is written with its control characters as
@@ -148,6 +161,40 @@ As
 .It Ic certdir Ar dir
 As
 .Fl certdir .
+.It Ic allow Ar what
+.It Ic deny Ar what
+Serve, or refuse, a client whose address
+.Ar what
+names:
+an IPv4 or IPv6 address, written plainly
+.Pq Li 192.0.2.7 , Li 2001:db8::7 ,
+a range
+.Pq Li 192.0.2.0/24 , Li 2001:db8::/32 ,
+with no bit of the address set past its prefix,
+.Li all ,
+or a host name, which matches the addresses it resolves to.
+The rules are checked in order as a client connects, before the TLS
+handshake: the first that matches decides, and a client none matches
+is served.
+So
+.Li allow 192.0.2.0/24
+then
+.Li deny all
+serves only that range, and
+.Li deny 198.51.100.7
+alone refuses only that address.
+An IPv4 rule matches a client the kernel gives as an IPv4-mapped IPv6
+address.
+Clients are never looked up by address: a name is resolved forward,
+when the server starts, where one that doesn't resolve within 10
+seconds is a mistake in the configuration, and again every
+.Ic refresh
+seconds.
+A lookup that fails then keeps the addresses the name had.
+At most 64 rules.
+.It Ic refresh Ar s
+Seconds between lookups of the rules' host names, 300 by default, at
+most 86400; 0 looks them up only when the server starts.
 .El
 .Pp
 Then each capsule, everything from its
@@ -356,7 +403,8 @@ it is
 .Fl n Ar count
 connections; 1 for a mistake in the configuration, or a failure to
 start (a certificate that can't be read or made, an address that can't
-be listened on, a user it can't become); 2 for a mistake in the
+be listened on, a user it can't become, a rule's host name that doesn't
+resolve); 2 for a mistake in the
 options.
 A mistake is reported on standard error.
 .Sh EXAMPLES

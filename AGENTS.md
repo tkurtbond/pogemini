@@ -64,6 +64,12 @@ writing are pogeminilib's (`~/Repos/Oberon/pogeminilib`, its Phase 8):
 written by `pogemini.Log`; `GemRequest` for `GeminiUrls.CheckRequest`,
 whose tests, `TestParse`'s cases, are pogeminilib's `TestUrls`; and a
 listing is written through `GeminiTextWriter` (PLAN.md, "pogeminilib").
+Since 2026-11-19 `allow` and `deny` rules on the client's address, by
+address, range, `all` or a host name resolved forward every `refresh`
+seconds (`src/GemAddresses`, `src/GemRules`; `TestConfig`, and
+`TestRun` through the server), refuse a client before its handshake
+through pogeminilib's `GeminiServer.SetAdmit`, so pogeminilib must be
+that new (PLAN.md, "Address rules").
 
 **poc 0.14.0 or later** (`StopRequests`), **and pogeminilib, pounix,
 polibtls, posockets and poDateTime built by the same poc.** A poc library works

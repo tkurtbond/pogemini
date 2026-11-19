@@ -108,7 +108,14 @@ configuration file, `pogemini -config /etc/pogemini.conf`:
       root /srv/gemini/example.net
       listings yes                  # list directories without index.gmi
 
-A capsule answers its name and its aliases; a request for any other
+Rules on the client's address come with the global settings:
+
+    allow 192.0.2.0/24              # the first rule to match decides;
+    allow friend.example            # a name, resolved again every 300 s
+    deny all                        # a client none matches is served
+
+A refused client is closed before the TLS handshake, and logged. A
+capsule answers its name and its aliases; a request for any other
 host, or another port, is refused (53). An internationalised name may
 be written in UTF-8 (`bücher.example`) or in its ASCII form
 (`xn--bcher-kva.example`), and a request in either form reaches it. An identity is a client
