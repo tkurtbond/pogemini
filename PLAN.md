@@ -784,7 +784,9 @@ CA:FALSE, critical.
   directory that was there is left as it is, since whoever made it
   chose its mode (TestCapsules: `drwx------` for the two made, a
   `chmod 755` directory unchanged; the made ones failed when GemCert set
-  755).
+  755; `make test` passed on Linux, and `gmake test`, with TestRun three
+  more times, on alerik, artos, yishana, jherek and cymoril, 322 to 324
+  checks, with pounix fd77666).
 - **Errors** are TlsMake's own (a CN over 64 characters, an encrypted
   or unreadable key, a directory that can't be written), and
   "can't make the certificate directory <dir>".
